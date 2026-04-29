@@ -3,7 +3,7 @@ set -euo pipefail
 
 # Install opencode
 echo "Installing opencode..."
-curl -fsSL https://opencode.ai/install.sh | sh
+curl -fsSL https://opencode.ai/install | bash
 
 # Configure opencode permissions
 echo "Configuring opencode permissions..."
