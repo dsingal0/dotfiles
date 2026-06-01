@@ -1,16 +1,26 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-read -p "Are we in a kubectl pod? (y/N) " -n 1 -r
-echo
-if [[ $REPLY =~ ^[Yy]$ ]]; then
-  export HOME=/workspace/dsingal
-  source ~/.bashrc
-fi
+# Download and install nvm:
+curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.4/install.sh | bash
+
+# in lieu of restarting the shell
+\. "$HOME/.nvm/nvm.sh"
+
+# Download and install Node.js:
+nvm install 26
+
+# Verify the Node.js version:
+node -v # Should print "v26.2.0".
+
+# Verify npm version:
+npm -v # Should print "11.13.0".
 
 # Install opencode
 echo "Installing opencode..."
 curl -fsSL https://opencode.ai/install | bash
+
+npm i -g opencode-ai
 
 # Configure opencode permissions
 echo "Configuring opencode permissions..."
@@ -24,6 +34,14 @@ JSONEOF
 # Install croc
 echo "Installing croc..."
 curl -fsSL https://getcroc.schollz.com | bash
+
+# Install gh
+echo "Installing gh..."
+curl -sS https://webi.sh/gh | sh
+
+# Install paseo
+echo "Installing paseo..."
+npm install -g @getpaseo/cli && paseo
 
 # Configure git identity for remote dev pods
 echo "Configuring git identity..."
