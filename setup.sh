@@ -39,6 +39,10 @@ curl -fsSL https://getcroc.schollz.com | bash
 echo "Installing gh..."
 curl -sS https://webi.sh/gh | sh
 
+# Install uv
+echo "Installing uv..."
+curl -LsSf https://astral.sh/uv/install.sh | sh
+
 # Install paseo
 echo "Installing paseo..."
 npm install -g @getpaseo/cli && paseo
