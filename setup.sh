@@ -43,6 +43,18 @@ curl -sS https://webi.sh/gh | sh
 echo "Installing uv..."
 curl -LsSf https://astral.sh/uv/install.sh | sh
 
+# Install Factory CLI
+echo "Installing Factory CLI..."
+curl -fsSL https://app.factory.ai/cli | sh
+
+# Install Cursor CLI
+echo "Installing Cursor CLI..."
+curl https://cursor.com/install -fsS | bash
+
+# Install Claude CLI
+echo "Installing Claude CLI..."
+curl -fsSL https://claude.ai/install.sh | bash
+
 # Install paseo
 echo "Installing paseo..."
 npm install -g @getpaseo/cli && paseo
