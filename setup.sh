@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
-
+apt-get update; apt-get install btop
 # Download and install nvm:
 curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.4/install.sh | bash
 
