@@ -18,9 +18,11 @@ npm -v # Should print "11.13.0".
 
 # Install opencode
 echo "Installing opencode..."
-curl -fsSL https://opencode.ai/install | bash
 
 npm i -g opencode-ai
+
+# Add opencode to PATH
+echo 'export PATH="$HOME/.opencode/bin:$PATH"' >> ~/.bashrc
 
 # Configure opencode permissions
 echo "Configuring opencode permissions..."
