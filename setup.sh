@@ -74,6 +74,13 @@ mkdir -p "$HOME/.local/bin"
 cp -f "$(dirname "$0")/factory-auth" "$HOME/.local/bin/factory-auth"
 chmod +x "$HOME/.local/bin/factory-auth"
 
+# Install the opencode-auth helper (transfers opencode config + auth via croc).
+# Usage on the logged-in machine:   opencode-auth send
+# Usage on the new/remote machine:  opencode-auth receive <code-from-send>
+echo "Installing opencode-auth helper..."
+cp -f "$(dirname "$0")/opencode-auth" "$HOME/.local/bin/opencode-auth"
+chmod +x "$HOME/.local/bin/opencode-auth"
+
 # Install/update Cursor CLI
 # echo "Installing Cursor CLI..."
 # curl https://cursor.com/install -fsS | bash

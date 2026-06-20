@@ -1,0 +1,131 @@
+#!/usr/bin/env bash
+# opencode-auth: copy opencode config + auth to the current machine using croc.
+#
+# On the machine you are already logged in on:
+#     opencode-auth send
+#   It prints a croc receive code. Keep that terminal open.
+#
+# On the new/remote machine (after running setup.sh so croc + this script are installed):
+#     opencode-auth receive <code>
+#
+# What gets transferred:
+#     ~/.config/opencode/opencode.json     (permission: allow, etc.)
+#     ~/.config/opencode/opencode.jsonc    (MCP server config, etc.)
+#     ~/.local/share/opencode/auth.json    (opencode auth token)
+#     ~/.local/share/opencode/account.json (opencode account credentials)
+#
+# Intentionally NOT transferred (machine/session-specific or large):
+#     ~/.local/share/opencode/opencode.db*  (session history DB, large)
+#     ~/.local/share/opencode/storage/, snapshot/, log/, tool-output/
+#
+# Copying the auth pair across lets you skip re-logging in to opencode on the new
+# machine. Copying the config files brings over your permission mode and MCP
+# servers without reconfiguring by hand.
+
+set -euo pipefail
+
+CONFIG_DIR="${HOME}/.config/opencode"
+DATA_DIR="${HOME}/.local/share/opencode"
+
+OPENCODE_JSON="${CONFIG_DIR}/opencode.json"
+OPENCODE_JSONC="${CONFIG_DIR}/opencode.jsonc"
+AUTH_FILE="${DATA_DIR}/auth.json"
+ACCOUNT_FILE="${DATA_DIR}/account.json"
+
+# Auth files are required; config files are optional (warn if missing).
+AUTH_REQUIRED=("$AUTH_FILE" "$ACCOUNT_FILE")
+CONFIG_OPTIONAL=("$OPENCODE_JSON" "$OPENCODE_JSONC")
+
+usage() {
+  cat <<USAGE
+Usage:
+  opencode-auth send                 # run on the logged-in machine
+  opencode-auth receive <code>       # run on the new machine
+USAGE
+}
+
+cmd_send() {
+  local missing=()
+  for f in "${AUTH_REQUIRED[@]}"; do
+    [[ -f "$f" ]] || missing+=("$f")
+  done
+  if [[ ${#missing[@]} -gt 0 ]]; then
+    echo "error: opencode auth files not found: ${missing[*]}" >&2
+    echo "       Make sure you are logged in to opencode on this machine." >&2
+    exit 1
+  fi
+
+  # Build send list: required auth + any optional config that exists.
+  local send_files=("${AUTH_REQUIRED[@]}")
+  for f in "${CONFIG_OPTIONAL[@]}"; do
+    if [[ -f "$f" ]]; then
+      send_files+=("$f")
+    else
+      echo "warning: optional config file not found, skipping: $f" >&2
+    fi
+  done
+
+  echo "Sending opencode config + auth (${#send_files[@]} files)..."
+  # croc preserves parent paths when sending multiple files, so it will
+  # recreate the relative layout. To keep it simple and flat, we send each
+  # file by basename via --out on the receiver (see cmd_receive).
+  croc send --yes "${send_files[@]}"
+}
+
+cmd_receive() {
+  local code="${1:-}"
+  if [[ -z "$code" ]]; then
+    echo "error: missing receive code." >&2
+    usage
+    exit 1
+  fi
+
+  mkdir -p "$CONFIG_DIR" "$DATA_DIR"
+
+  # Receive everything into a temp dir first; croc may flatten or nest paths
+  # depending on how it was sent. Then place each known file where it belongs.
+  local tmp
+  tmp="$(mktemp -d)"
+  trap 'rm -rf "$tmp"' EXIT
+
+  croc --yes --overwrite --out "$tmp" "$code"
+
+  # Locate received files (croc recreates the basename at minimum).
+  place() {
+    local name="$1" dest="$2"
+    local found=""
+    # Direct match in tmp root.
+    if [[ -f "${tmp}/${name}" ]]; then
+      found="${tmp}/${name}"
+    else
+      # Search nested layout (croc may preserve relative dir structure).
+      found="$(find "$tmp" -type f -name "$name" -print -quit 2>/dev/null || true)"
+    fi
+    if [[ -n "$found" && -f "$found" ]]; then
+      cp -f "$found" "$dest"
+      chmod 600 "$dest"
+      echo "  restored: $dest"
+    else
+      echo "  warning: $name not found in received bundle" >&2
+    fi
+  }
+
+  place "opencode.json"      "$OPENCODE_JSON"
+  place "opencode.jsonc"     "$OPENCODE_JSONC"
+  place "auth.json"          "$AUTH_FILE"
+  place "account.json"      "$ACCOUNT_FILE"
+
+  echo
+  echo "opencode config + auth restored."
+  echo "  - config: ${CONFIG_DIR}"
+  echo "  - auth:   ${DATA_DIR}"
+  echo
+  echo "Run 'opencode' to verify."
+}
+
+case "${1:-}" in
+  send)    cmd_send ;;
+  receive) shift || true; cmd_receive "$@" ;;
+  -h|--help|help|"") usage ;;
+  *) echo "unknown command: ${1:-}" >&2; usage; exit 1 ;;
+esac
