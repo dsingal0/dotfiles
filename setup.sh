@@ -67,8 +67,8 @@ echo "Installing Factory CLI..."
 curl -fsSL https://app.factory.ai/cli | sh
 
 # Install/update Cursor CLI
-echo "Installing Cursor CLI..."
-curl https://cursor.com/install -fsS | bash
+# echo "Installing Cursor CLI..."
+# curl https://cursor.com/install -fsS | bash
 
 # Install/update paseo
 echo "Installing paseo..."
