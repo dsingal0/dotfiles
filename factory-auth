@@ -1,0 +1,71 @@
+#!/usr/bin/env bash
+# factory-auth: copy Factory Droid auth to the current machine using croc.
+#
+# On the machine you are already logged in on:
+#     factory-auth send
+#   It prints a croc receive code. Keep that terminal open.
+#
+# On the new/remote machine (after running setup.sh so croc + this script are installed):
+#     factory-auth receive <code>
+#
+# What gets transferred:
+#     ~/.factory/auth.v2.key   (the encryption key)
+#     ~/.factory/auth.v2.file  (the encrypted auth token)
+#
+# These are the only two files Factory CLI uses for auth. Copying them across
+# lets you skip the re-login flow on the new machine.
+
+set -euo pipefail
+
+FACTORY_DIR="${HOME}/.factory"
+KEY_FILE="${FACTORY_DIR}/auth.v2.key"
+AUTH_FILE="${FACTORY_DIR}/auth.v2.file"
+
+usage() {
+  cat <<USAGE
+Usage:
+  factory-auth send                 # run on the logged-in machine
+  factory-auth receive <code>       # run on the new machine
+USAGE
+}
+
+cmd_send() {
+  if [[ ! -f "$KEY_FILE" || ! -f "$AUTH_FILE" ]]; then
+    echo "error: Factory auth files not found at ${KEY_FILE} and ${AUTH_FILE}." >&2
+    echo "       Make sure you are logged in to Factory CLI on this machine." >&2
+    exit 1
+  fi
+
+  # Send both files. croc will print a one-time code the receiver uses.
+  # --yes skips prompts; croc will still print the code to stdout.
+  croc send --yes "$KEY_FILE" "$AUTH_FILE"
+}
+
+cmd_receive() {
+  local code="${1:-}"
+  if [[ -z "$code" ]]; then
+    echo "error: missing receive code." >&2
+    usage
+    exit 1
+  fi
+
+  mkdir -p "$FACTORY_DIR"
+
+  # Receive into ~/.factory and force overwrite if auth already exists.
+  croc --yes --overwrite --out "$FACTORY_DIR" "$code"
+
+  # croc preserves filenames, so received files land at the right paths.
+  # Tighten perms so other users can't read the credential.
+  chmod 600 "$KEY_FILE" "$AUTH_FILE" 2>/dev/null || true
+
+  echo
+  echo "Factory auth restored to ${FACTORY_DIR}."
+  echo "Run 'droid' (or whatever invokes the Factory CLI) to verify."
+}
+
+case "${1:-}" in
+  send)    cmd_send ;;
+  receive) shift || true; cmd_receive "$@" ;;
+  -h|--help|help|"") usage ;;
+  *) echo "unknown command: ${1:-}" >&2; usage; exit 1 ;;
+esac
