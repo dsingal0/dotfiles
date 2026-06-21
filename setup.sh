@@ -11,9 +11,15 @@ append_once() {
 }
 
 # Install/update system packages (btop).
-# `apt-get update` may fail if not root / on non-Debian; tolerate that.
-sudo apt-get update -y || apt-get update -y || true
-sudo apt-get install -y btop || apt-get install -y btop || true
+# Use sudo only if available and we're not already root; otherwise call apt-get
+# directly. All of this is best-effort (tolerate missing apt / non-root / non-Debian).
+if command -v sudo >/dev/null 2>&1 && [[ "${EUID:-$(id -u)}" -ne 0 ]]; then
+  ADO="sudo apt-get"
+else
+  ADO="apt-get"
+fi
+$ADO update -y || true
+$ADO install -y btop || true
 
 # Download and install/update nvm:
 curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.4/install.sh | bash
