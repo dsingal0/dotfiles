@@ -67,8 +67,9 @@ cmd_send() {
   done
 
   echo "Sending Factory auth + config (${#send_files[@]} files)..."
-  # croc prints a one-time receive code to stdout. --yes skips prompts on the sender side.
-  croc send --yes "${send_files[@]}"
+  # croc prints a one-time receive code to stdout. --yes is a GLOBAL flag and
+  # must come before the subcommand; it skips prompts on the sender side.
+  croc --yes send "${send_files[@]}"
 }
 
 cmd_receive() {

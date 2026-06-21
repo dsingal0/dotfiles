@@ -69,7 +69,8 @@ cmd_send() {
   # croc preserves parent paths when sending multiple files, so it will
   # recreate the relative layout. To keep it simple and flat, we send each
   # file by basename via --out on the receiver (see cmd_receive).
-  croc send --yes "${send_files[@]}"
+  # --yes is a GLOBAL croc flag and must come before the subcommand.
+  croc --yes send "${send_files[@]}"
 }
 
 cmd_receive() {
