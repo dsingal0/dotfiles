@@ -24,6 +24,10 @@ $ADO install -y btop || true
 # Download and install/update nvm:
 curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.4/install.sh | bash
 
+# Ensure nvm init lines are in .bashrc (the installer sometimes fails to add them)
+append_once "$HOME/.bashrc" 'export NVM_DIR="$HOME/.nvm"'
+append_once "$HOME/.bashrc" '[ -s "$NVM_DIR/nvm.sh" ] && \. "$NVM_DIR/nvm.sh"'
+
 # in lieu of restarting the shell
 \. "$HOME/.nvm/nvm.sh"
 
