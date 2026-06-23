@@ -76,21 +76,6 @@ curl -LsSf https://astral.sh/uv/install.sh | sh
 echo "Installing Factory CLI..."
 curl -fsSL https://app.factory.ai/cli | sh
 
-# Install the factory-auth helper (transfers Factory Droid auth between machines via croc).
-# Usage on the logged-in machine:   factory-auth send
-# Usage on the new/remote machine:  factory-auth receive <code-from-send>
-echo "Installing factory-auth helper..."
-mkdir -p "$HOME/.local/bin"
-cp -f "$(dirname "$0")/factory-auth" "$HOME/.local/bin/factory-auth"
-chmod +x "$HOME/.local/bin/factory-auth"
-
-# Install the opencode-auth helper (transfers opencode config + auth via croc).
-# Usage on the logged-in machine:   opencode-auth send
-# Usage on the new/remote machine:  opencode-auth receive <code-from-send>
-echo "Installing opencode-auth helper..."
-cp -f "$(dirname "$0")/opencode-auth" "$HOME/.local/bin/opencode-auth"
-chmod +x "$HOME/.local/bin/opencode-auth"
-
 # Install/update Cursor CLI
 # echo "Installing Cursor CLI..."
 # curl https://cursor.com/install -fsS | bash
