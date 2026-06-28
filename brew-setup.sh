@@ -15,8 +15,8 @@ brew tap manaflow-ai/cmux
 
 # Packages to install and keep up to date
 # `node` provides npm, used below to install opencode v2 (@next beta has no brew formula).
-FORMULAS=(rtk node)
-CASKS=(cmux cursor-cli droid paseo)
+FORMULAS=(gh node rtk)
+CASKS=(cmux cursor-cli droid)
 
 # Install (no-op if already installed) then upgrade to latest
 for pkg in "${FORMULAS[@]}"; do
@@ -294,6 +294,9 @@ with open(config_path, "w") as f:
     json.dump(config, f, indent=2)
     f.write("\n")
 PYEOF
+
+# Install paseo CLI via npm (latest npm from brew's node formula)
+npm install -g @getpaseo/cli
 
 # Remove stale downloads and old versions
 brew cleanup --prune=all
