@@ -15,8 +15,8 @@ brew tap manaflow-ai/cmux
 
 # Packages to install and keep up to date
 # `node` provides npm, used below to install opencode.
-FORMULAS=(gh node rtk)
-CASKS=(cmux cursor-cli)
+FORMULAS=(gh node mole rtk)
+CASKS=(brave-browser@beta cmux cursor-cli)
 
 # Install (no-op if already installed) then upgrade to latest
 for pkg in "${FORMULAS[@]}"; do
