@@ -46,6 +46,10 @@ echo "Installing opencode..."
 npm i -g opencode-ai
 opencode --version
 
+# Install droid via npm
+npm config set allow-scripts="droid,opencode-ai" --location=user
+npm install -g droid
+
 # Install/update croc
 echo "Installing croc..."
 curl -fsSL https://getcroc.schollz.com | bash

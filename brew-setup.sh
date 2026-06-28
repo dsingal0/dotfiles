@@ -16,7 +16,7 @@ brew tap manaflow-ai/cmux
 # Packages to install and keep up to date
 # `node` provides npm, used below to install opencode.
 FORMULAS=(gh node rtk)
-CASKS=(cmux cursor-cli droid)
+CASKS=(cmux cursor-cli)
 
 # Install (no-op if already installed) then upgrade to latest
 for pkg in "${FORMULAS[@]}"; do
@@ -33,6 +33,10 @@ done
 echo "Installing opencode..."
 npm i -g opencode-ai
 opencode --version
+
+# Install droid via npm (was previously a brew cask)
+npm config set allow-scripts="droid,opencode-ai" --location=user
+npm install -g droid
 
 # Configure Factory custom models (Baseten BYOK)
 # API key is read from .env in the repo root (kept local, never committed).
