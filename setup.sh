@@ -83,23 +83,18 @@ git config --global user.name "Dhruv Singal"
 git config --global user.email "dhruvsingalabc@gmail.com"
 
 # Configure Factory custom models (Baseten BYOK)
-echo "Configuring Factory Baseten custom models..."
-# ---------------------------------------------------------------------------
-# IMPORTANT: You must fill in your Baseten API key below before running this!
-#
-#   Get your API key from: https://app.baseten.co/settings
-#
-#   Replace the empty "" for BASETEN_API_KEY with your key, e.g.:
-#       BASETEN_API_KEY="AB12CD34.yourKeyHere..."
-#
-#   This script writes the key into:  ~/.factory/settings.json
-#   (under the "customModels" array's "apiKey" field for each Baseten model)
-# ---------------------------------------------------------------------------
-BASETEN_API_KEY=""  # <-- FILL ME IN: paste your Baseten API key between the quotes
+# API key is read from .env in the repo root (kept local, never committed).
+# Copy .env.example to .env and fill in your key:
+#   cp .env.example .env
+# Key can also be exported directly: BASETEN_API_KEY=your_key ./setup.sh
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+if [[ -f "$SCRIPT_DIR/.env" ]]; then
+  set -a; source "$SCRIPT_DIR/.env"; set +a
+fi
 
-if [[ -z "$BASETEN_API_KEY" ]]; then
-  echo "WARNING: BASETEN_API_KEY is empty in $0. Skipping Baseten model config."
-  echo "         Edit this script, fill in BASETEN_API_KEY, and re-run to enable Baseten models."
+if [[ -z "${BASETEN_API_KEY:-}" ]]; then
+  echo "WARNING: BASETEN_API_KEY is not set. Skipping Baseten model config."
+  echo "         To enable: cp .env.example .env and fill in your key, or export BASETEN_API_KEY."
 else
   mkdir -p ~/.factory
   BASETEN_API_KEY="$BASETEN_API_KEY" python3 - << 'PYEOF'
@@ -227,9 +222,12 @@ baseten_models = [
     }
 ]
 
-existing = {m.get("model") for m in settings["customModels"]}
+existing = {m.get("model"): i for i, m in enumerate(settings["customModels"])}
 for m in baseten_models:
-    if m["model"] not in existing:
+    name = m["model"]
+    if name in existing:
+        settings["customModels"][existing[name]]["apiKey"] = api_key
+    else:
         settings["customModels"].append(m)
 
 with open(settings_path, "w") as f:
