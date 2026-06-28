@@ -41,14 +41,10 @@ node -v # Should print "v26.2.0".
 # Verify npm version:
 npm -v # Should print "11.13.0".
 
-# Install/update opencode v2 (@next beta -> `opencode2` binary)
-# v2 ships as @opencode-ai/cli@next and installs a SEPARATE `opencode2` binary so
-# it coexists with any v1 `opencode` install. npm's global bin is already on PATH
-# via nvm, so no extra PATH line is needed (v1 used ~/.opencode/bin from its curl
-# installer; v2-via-npm does not use that directory).
-echo "Installing opencode v2..."
-npm i -g @opencode-ai/cli@next
-opencode2 --version
+# Install/update opencode (stable)
+echo "Installing opencode..."
+npm i -g opencode-ai
+opencode --version
 
 # Install/update croc
 echo "Installing croc..."
@@ -235,106 +231,5 @@ with open(settings_path, "w") as f:
     f.write("\n")
 PYEOF
 fi
-
-# Configure opencode v2 custom model + permissions (Baseten BYOK - GLM 5.2 1M)
-# Adds the GLM-5.2-1M model under the "baseten" provider with max reasoning,
-# thinking preservation (interleaved reasoning_content), and tool calling.
-# NOTE: The Baseten API key for opencode is stored separately via `/connect`
-#       (run `opencode2` and issue /connect) in ~/.local/share/opencode/auth.json.
-#       This config only defines the model.
-#
-# NOTE on schema: opencode2's CLI loads custom models from the V1 `provider`
-#       (singular) config via its legacy Config.Service
-#       (src/provider/provider.ts reads cfg.provider, NOT cfg.providers). The v2
-#       `providers` (plural) schema is consumed only by the desktop/web catalog.
-#       So the model below is intentionally kept in v1 schema (reasoning /
-#       interleaved / tool_call / options) -- that is what `opencode2 models`
-#       and session model resolution actually read. Forward-porting it to the
-#       v2 `providers` plural shape would make the model invisible to opencode2.
-#
-# Permissions: opencode2's CLI reads cfg.permission (v1) via Permission.fromConfig
-#       (src/permission/index.ts). A bare "allow" string is mishandled there, so
-#       the working global allow-all is {"*":"allow"}.
-echo "Configuring opencode v2 (Baseten model + permissions)..."
-mkdir -p ~/.config/opencode
-python3 - << 'PYEOF'
-import json, os
-
-config_path = os.path.expanduser("~/.config/opencode/opencode.jsonc")
-
-# Read existing config (strip JSONC comments for parsing, preserve as JSONC on write)
-try:
-    with open(config_path, "r") as f:
-        raw = f.read()
-    # Naive string-aware comment stripper for parsing
-    stripped = []
-    in_string = False
-    esc = False
-    i = 0
-    while i < len(raw):
-        c = raw[i]
-        if in_string:
-            stripped.append(c)
-            if esc:
-                esc = False
-            elif c == "\\":
-                esc = True
-            elif c == '"':
-                in_string = False
-            i += 1
-            continue
-        if c == '"':
-            in_string = True
-            stripped.append(c)
-            i += 1
-            continue
-        if c == "/" and i + 1 < len(raw) and raw[i+1] == "/":
-            while i < len(raw) and raw[i] != "\n":
-                i += 1
-            continue
-        if c == "/" and i + 1 < len(raw) and raw[i+1] == "*":
-            i += 2
-            while i + 1 < len(raw) and not (raw[i] == "*" and raw[i+1] == "/"):
-                i += 1
-            i += 2
-            continue
-        stripped.append(c)
-        i += 1
-    config = json.loads("".join(stripped))
-except (FileNotFoundError, json.JSONDecodeError):
-    config = {}
-
-config.setdefault("$schema", "https://opencode.ai/config.json")
-
-# Global allow-all permissions (v1 schema, read by opencode2 CLI). Idempotent.
-config["permission"] = {"*": "allow"}
-
-config.setdefault("provider", {})
-config["provider"].setdefault("baseten", {})
-config["provider"]["baseten"].setdefault("models", {})
-
-# Only add the model if not already present (idempotent)
-if "zai-org/GLM-5.2-1M" not in config["provider"]["baseten"]["models"]:
-    config["provider"]["baseten"]["models"]["zai-org/GLM-5.2-1M"] = {
-        "name": "GLM 5.2 1M [Baseten]",
-        "reasoning": True,
-        "tool_call": True,
-        "interleaved": {
-            "field": "reasoning_content"
-        },
-        "limit": {
-            "context": 1048576,
-            "input": 920000,
-            "output": 65536
-        },
-        "options": {
-            "reasoningEffort": "max"
-        }
-    }
-
-with open(config_path, "w") as f:
-    json.dump(config, f, indent=2)
-    f.write("\n")
-PYEOF
 
 echo "Setup complete!"
