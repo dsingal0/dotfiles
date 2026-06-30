@@ -56,7 +56,38 @@ npm install -g droid
 
 # Install/update croc
 echo "Installing croc..."
-curl -fsSL https://getcroc.schollz.com | bash
+CROC_VERSION="v10.4.4"
+CROC_OS="$(uname -s)"
+case "$CROC_OS" in
+  Linux)     CROC_OS="Linux" ;;
+  Darwin)    CROC_OS="macOS" ;;
+  FreeBSD)   CROC_OS="FreeBSD" ;;
+  OpenBSD)   CROC_OS="OpenBSD" ;;
+  NetBSD)    CROC_OS="NetBSD" ;;
+  DragonFly) CROC_OS="DragonFlyBSD" ;;
+  *) echo "Unsupported croc OS: $(uname -s)" >&2; exit 1 ;;
+esac
+CROC_ARCH="$(uname -m)"
+case "$CROC_ARCH" in
+  x86_64|amd64|x64)    CROC_ARCH="64bit" ;;
+  i386|i486|i586|i686) CROC_ARCH="32bit" ;;
+  aarch64|arm64)       CROC_ARCH="ARM64" ;;
+  armv5*)              CROC_ARCH="ARMv5" ;;
+  armv6l|armv7l|arm)   CROC_ARCH="ARM" ;;
+  riscv64)             CROC_ARCH="RISCV64" ;;
+  *) echo "Unsupported croc arch: $(uname -m)" >&2; exit 1 ;;
+esac
+CROC_ASSET="croc_${CROC_VERSION}_${CROC_OS}-${CROC_ARCH}.tar.gz"
+CROC_URL="https://github.com/schollz/croc/releases/download/${CROC_VERSION}/${CROC_ASSET}"
+CROC_TMP="$(mktemp -d)"
+curl -fsSL "$CROC_URL" -o "$CROC_TMP/$CROC_ASSET"
+tar -xzf "$CROC_TMP/$CROC_ASSET" -C "$CROC_TMP"
+if [[ "${EUID:-$(id -u)}" -eq 0 ]]; then
+  install -m 0755 "$CROC_TMP/croc" /usr/local/bin/croc
+else
+  sudo install -m 0755 "$CROC_TMP/croc" /usr/local/bin/croc
+fi
+rm -rf "$CROC_TMP"
 
 # Install/update gh
 echo "Installing gh..."
