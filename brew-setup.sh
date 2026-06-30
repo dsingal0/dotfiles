@@ -15,7 +15,7 @@ brew tap manaflow-ai/cmux
 
 # Packages to install and keep up to date
 # `node` provides npm, used below to install opencode.
-FORMULAS=(gh node mole rtk)
+FORMULAS=(gh node mole rtk tmux)
 CASKS=(brave-browser@beta cmux cursor-cli)
 
 # Install (no-op if already installed) then upgrade to latest
@@ -28,6 +28,10 @@ for pkg in "${CASKS[@]}"; do
   brew install --cask "$pkg"
   brew upgrade --cask "$pkg"
 done
+
+# Symlink tmux config (enables mouse scroll passthrough for Droid in tmux)
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+ln -sf "$SCRIPT_DIR/tmux.conf" "$HOME/.tmux.conf"
 
 # Install/update opencode (stable)
 echo "Installing opencode..."
@@ -43,7 +47,6 @@ npm install -g droid
 # Copy .env.example to .env and fill in your key:
 #   cp .env.example .env
 # Key can also be exported directly: BASETEN_API_KEY=your_key ./brew-setup.sh
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 if [[ -f "$SCRIPT_DIR/.env" ]]; then
   set -a; source "$SCRIPT_DIR/.env"; set +a
 fi
