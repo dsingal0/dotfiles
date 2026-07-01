@@ -19,11 +19,13 @@ else
   ADO="apt-get"
 fi
 $ADO update -y || true
-$ADO install -y btop tmux libclang-dev || true
+$ADO install -y btop tmux libclang-dev tree || true
 
 # Symlink tmux config (enables mouse scroll passthrough for Droid in tmux)
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ln -sf "$SCRIPT_DIR/tmux.conf" "$HOME/.tmux.conf"
+# Reload config into running tmux server, if any
+tmux source-file "$HOME/.tmux.conf" 2>/dev/null || true
 
 # Download and install/update nvm:
 curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.4/install.sh | bash
