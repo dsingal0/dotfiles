@@ -23,24 +23,14 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 $ADO install -y btop libclang-dev tree libevent-dev libncurses-dev build-essential bison || true
 
-# Install/update tmux (build latest from source — apt ships an old version)
+# Install/update tmux from apt.
+# Previously this built tmux from source with --prefix=/usr/local, which
+# shadowed the distro binary in /usr/bin. We now use the distro package so the
+# system tmux is what you get; see tmux.conf for a tmux 3.3+ version guard
+# around the (3.2a-unavailable) extended-keys-format option.
 echo "Installing tmux..."
-TMUX_VERSION="3.7a"
-if ! tmux -V 2>/dev/null | grep -q "$TMUX_VERSION"; then
-  TMUX_TMP="$(mktemp -d)"
-  curl -fsSL "https://github.com/tmux/tmux/releases/download/${TMUX_VERSION}/tmux-${TMUX_VERSION}.tar.gz" -o "$TMUX_TMP/tmux.tar.gz"
-  tar -xzf "$TMUX_TMP/tmux.tar.gz" -C "$TMUX_TMP"
-  (
-    cd "$TMUX_TMP/tmux-${TMUX_VERSION}" && ./configure --prefix=/usr/local && make -j$(nproc)
-    if [[ "${EUID:-$(id -u)}" -eq 0 ]]; then
-      make install
-    else
-      sudo make install
-    fi
-  )
-  rm -rf "$TMUX_TMP"
-  tmux -V
-fi
+$ADO install -y tmux
+tmux -V
 
 # Symlink tmux config (enables mouse scroll passthrough for Droid in tmux)
 ln -sf "$SCRIPT_DIR/tmux.conf" "$HOME/.tmux.conf"
