@@ -19,7 +19,7 @@ else
   ADO="apt-get"
 fi
 $ADO update -y || true
-$ADO install -y btop tmux || true
+$ADO install -y btop tmux libclang-dev || true
 
 # Symlink tmux config (enables mouse scroll passthrough for Droid in tmux)
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -111,6 +111,14 @@ fi
 \. "$HOME/.cargo/env" 2>/dev/null || true
 rustc --version
 cargo --version
+
+# Set LIBCLANG_PATH for bindgen (needed by Rust crates that wrap C/C++ libs)
+for d in /usr/lib/llvm-*/lib; do
+  if [[ -f "$d/libclang.so" ]]; then
+    append_once "$HOME/.bashrc" "export LIBCLANG_PATH=\"$d\""
+    break
+  fi
+done
 
 # Install/update Factory CLI
 echo "Installing Factory CLI..."
