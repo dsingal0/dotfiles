@@ -40,6 +40,7 @@ import os
 import re
 import shutil
 import sqlite3
+import subprocess
 import sys
 import time
 
@@ -388,10 +389,35 @@ def latest_version_for(con: sqlite3.Connection, schema: str) -> str:
         return "1.17.12"
 
 
-def git_toplevel(cwd: str) -> str | None:
-    d = os.path.abspath(cwd)
-    while d and d != "/":
-        if os.path.isdir(os.path.join(d, ".git")) or os.path.isfile(os.path.join(d, ".git")):
+def git_main_worktree(cwd: str) -> str | None:
+    """Resolve the main git repository worktree for cwd.
+
+    A linked git *worktree* (`.git` is a file) shares its object store with the
+    main repo. opencode bills sessions to the MAIN repo's project, not the
+    linked worktree, so we resolve via `git rev-parse --git-common-dir` and take
+    its parent directory.
+    """
+    cwd = os.path.abspath(cwd)
+    try:
+        common = subprocess.run(
+            ["git", "-C", cwd, "rev-parse", "--git-common-dir"],
+            capture_output=True, text=True, timeout=5).stdout.strip()
+        if common and not os.path.isabs(common):
+            toplevel = subprocess.run(
+                ["git", "-C", cwd, "rev-parse", "--show-toplevel"],
+                capture_output=True, text=True, timeout=5).stdout.strip()
+            base = toplevel if (toplevel and os.path.isabs(toplevel)) else cwd
+            common = os.path.normpath(os.path.join(base, common))
+        if common:
+            main = os.path.dirname(os.path.realpath(common))
+            if os.path.isdir(main):
+                return main
+    except Exception:
+        pass
+    # Fallback: walk up for a plain .git directory.
+    d = cwd
+    while d and d != os.path.sep:
+        if os.path.isdir(os.path.join(d, ".git")):
             return d
         nd = os.path.dirname(d)
         if nd == d:
@@ -400,9 +426,28 @@ def git_toplevel(cwd: str) -> str | None:
     return None
 
 
+def _session_path(cwd: str, worktree: str) -> str:
+    """opencode path = relpath of cwd from the project worktree, or '' if cwd is
+    the worktree or lies outside it. Matches opencode's own convention."""
+    try:
+        r = os.path.relpath(cwd, worktree)
+    except ValueError:
+        return ""
+    if r == "." or r.startswith(".."):
+        return ""
+    return r
+
+
 def ensure_project(cur, cwd: str) -> str:
-    top = git_toplevel(cwd)
-    if not top:
+    # 1) If opencode already filed a session for this exact directory, reuse its
+    #    project so the import lands where opencode would show it.
+    row = cur.execute(
+        "SELECT project_id FROM session WHERE directory=? AND project_id IS NOT NULL LIMIT 1",
+        (cwd,)).fetchone()
+    if row:
+        return row[0]
+    main = git_main_worktree(cwd)
+    if not main:
         cur.execute("SELECT id FROM project WHERE id='global'")
         if cur.fetchone() is None:
             now = _now_ms()
@@ -412,19 +457,17 @@ def ensure_project(cur, cwd: str) -> str:
                         "VALUES('global','/',NULL,NULL,NULL,NULL,NULL,?,?,NULL,'[]',NULL)",
                         (now, now))
         return "global"
-    cur.execute("SELECT id FROM project WHERE worktree=?", (top,))
-    row = cur.fetchone()
+    row = cur.execute("SELECT id FROM project WHERE worktree=?", (main,)).fetchone()
     if row:
         return row[0]
-    pid = hashlib.sha1(top.encode()).hexdigest()
-    name = os.path.basename(top) or top
-    if name == top:
-        name = None
+    import secrets
+    pid = secrets.token_hex(20)
+    name = os.path.basename(main) or None
     now = _now_ms()
     cur.execute("INSERT INTO project(id, worktree, vcs, name, icon_url, icon_url_override, "
                 "icon_color, time_created, time_updated, time_initialized, sandboxes, commands) "
                 "VALUES(?,?,'git',?,NULL,NULL,NULL,?,?,NULL,'[]',NULL)",
-                (pid, top, name, now, now))
+                (pid, main, name, now, now))
     return pid
 
 
@@ -467,6 +510,8 @@ def write_stable(con, ops, model, version: str):
         cur.execute("DELETE FROM session WHERE id=?", (ses_id,))
 
     pid = ensure_project(cur, ops["cwd"])
+    pwt = cur.execute("SELECT worktree FROM project WHERE id=?", (pid,)).fetchone()[0]
+    ses_path = _session_path(ops["cwd"], pwt)
     provider, model_id, variant = model["provider"], model["model"], model["variant"]
     now = _now_ms()
     tc = ops["start_ms"] or now
@@ -479,7 +524,7 @@ def write_stable(con, ops, model, version: str):
         "tokens_cache_read, tokens_cache_write, revert, permission, agent, model, "
         "time_created, time_updated, time_compacting, time_archived) "
         "VALUES(?,?,NULL,NULL,?,?,?,?,?,NULL,0,0,0,NULL,NULL,0,0,0,0,0,0,NULL,NULL,'build',?,?,?,NULL,NULL)",
-        (ses_id, pid, _rand_slug(), ops["cwd"], os.path.basename(ops["cwd"]) or "",
+        (ses_id, pid, _rand_slug(), ops["cwd"], ses_path,
          ops["title"], version, session_model, tc, tu))
 
     clock = tc or _now_ms()
@@ -581,6 +626,8 @@ def write_next(con, ops, model, version: str):
     if exists:
         cur.execute("DELETE FROM session WHERE id=?", (ses_id,))
     pid = ensure_project(cur, ops["cwd"])
+    pwt = cur.execute("SELECT worktree FROM project WHERE id=?", (pid,)).fetchone()[0]
+    ses_path = _session_path(ops["cwd"], pwt)
     provider, model_id, variant = model["provider"], model["model"], model["variant"]
     now = _now_ms()
     tc = ops["start_ms"] or now
@@ -593,7 +640,7 @@ def write_next(con, ops, model, version: str):
         "tokens_cache_read, tokens_cache_write, revert, permission, agent, model, "
         "time_created, time_updated, time_compacting, time_archived) "
         "VALUES(?,?,NULL,NULL,?,?,?,?,?,NULL,0,0,0,NULL,NULL,0,0,0,0,0,0,NULL,NULL,'build',?,?,?,NULL,NULL)",
-        (ses_id, pid, _rand_slug(), ops["cwd"], os.path.basename(ops["cwd"]) or "",
+        (ses_id, pid, _rand_slug(), ops["cwd"], ses_path,
          ops["title"], version, session_model, tc, tu))
 
     seq = 0
