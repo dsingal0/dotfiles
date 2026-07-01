@@ -301,6 +301,10 @@ _DROID_TO_OC_TOOL = {
     "FetchUrl": "webfetch",
     "WebSearch": "websearch",
     "TodoWrite": "todowrite",
+    "Task": "task",
+    "Create": "write",
+    "AskUser": "question",
+    "Skill": "skill",
 }
 
 
@@ -348,6 +352,18 @@ def _map_tool_input(name: str, inp: dict | str | None) -> tuple[str, dict]:
         i = {"query": inp.get("query")}
     elif name == "TodoWrite":
         i = {"todos": inp.get("todos")}
+    elif name == "Task":
+        i = {"subagent_type": inp.get("subagent_type"),
+             "description": inp.get("description"), "prompt": inp.get("prompt")}
+        if inp.get("command"):
+            i["command"] = inp["command"]
+    elif name == "Create":
+        i = {"filePath": inp.get("file_path") or inp.get("filePath"),
+             "content": inp.get("content", "")}
+    elif name == "AskUser":
+        i = {"question": inp.get("questionnaire") or inp.get("question") or ""}
+    elif name == "Skill":
+        i = {"name": inp.get("skill") or inp.get("name")}
     return oc_name, i
 
 
