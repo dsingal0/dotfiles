@@ -37,6 +37,10 @@ ln -sf "$SCRIPT_DIR/tmux.conf" "$HOME/.tmux.conf"
 # Reload config into running tmux server, if any
 tmux source-file "$HOME/.tmux.conf" 2>/dev/null || true
 
+# Link custom user scripts into ~/.local/bin (on PATH via the gh step below)
+mkdir -p "$HOME/.local/bin"
+ln -sf "$SCRIPT_DIR/bin/droid-to-opencode" "$HOME/.local/bin/droid-to-opencode"
+
 # Download and install/update nvm:
 curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.4/install.sh | bash
 

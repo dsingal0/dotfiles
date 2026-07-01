@@ -1,0 +1,800 @@
+#!/usr/bin/env python3
+"""droid-to-opencode — import Factory 'droid' sessions into opencode.
+
+A droid session (Factory's CLI agent) lives as a JSONL transcript under
+~/.factory/sessions/<encoded-cwd>/<session-id>.jsonl plus a <id>.settings.json.
+opencode stores sessions in a SQLite DB at ~/.local/share/opencode.
+
+This tool parses a droid transcript, reconstructs the conversation, and
+writes it into opencode's session store so it shows up in the session list and
+can be resumed with `opencode --resume <session-id>`.
+
+It supports BOTH opencode schemas:
+  * "stable"  (1.17.x, opencode.db) : session + message + part tables
+  * "next"    (opencode-next.db)     : session + session_message tables
+The target DB and schema are auto-detected from the newest DB file; override
+with --db / --schema.
+
+USAGE
+  droid-to-opencode <session-id>            # dry-run (read-only) plan
+  droid-to-opencode <session-id> --apply     # write into opencode
+  droid-to-opencode last --apply            # import most-recent droid session
+  droid-to-opencode --list                  # list droid sessions
+  droid-to-opencode <id> --apply --replace  # overwrite an existing import
+  droid-to-opencode <id> --apply --model 'baseten/zai-org/GLM-5.2' --variant max
+
+IMPORTANT
+  Apply writes to opencode's SQLite DB. Close opencode first if possible. The
+  tool backs up the target DB before writing and is idempotent (imports go to a
+  stable session id `ses_droid_<droid-id>`); run opencode again to see the new
+  session in the list.
+"""
+from __future__ import annotations
+
+import argparse
+import datetime as _dt
+import glob
+import hashlib
+import json
+import os
+import re
+import shutil
+import sqlite3
+import sys
+import time
+
+FACTORY = os.path.expanduser("~/.factory/sessions")
+OC_DIR = os.path.expanduser("~/.local/share/opencode")
+STATE_DIR = os.path.expanduser("~/.local/state/opencode")
+SERVER_JSON = os.path.join(STATE_DIR, "server.json")
+
+ADJ = ("eager brave calm swift quiet bold keen bright steady gentle noble solid crisp silent golden royal curious "
+        "humble mighty patient silver cosmic distant friendly happy loyal open sharp warm wild zesty cozy vivid "
+        "sunny frosty misty").split()
+NOUN = ("rocket garden planet river forest mountain harbor bridge meadow ocean candle ember falcon lantern needle "
+        "oak path pine quartz stone summit tide trail vault willow zenith beacon cliff dune grove nest peak ridge "
+        "stream vale").split()
+
+# --------------------------------------------------------------------------- paths
+
+
+def factory_session_candidates() -> list[dict]:
+    out = []
+    for path in glob.glob(os.path.join(FACTORY, "*", "*.jsonl")):
+        b = os.path.basename(path)
+        m = re.match(r"([0-9a-fA-F-]{8,})\.jsonl$", b)
+        if not m:
+            continue
+        sid = m.group(1)
+        cwd = _encoded_dir_to_cwd(os.path.basename(os.path.dirname(path)))
+        st = os.stat(path)
+        out.append({"id": sid, "path": path, "cwd": cwd, "mtime": st.st_mtime,
+                    "size": st.st_size})
+    out.sort(key=lambda r: r["mtime"], reverse=True)
+    return out
+
+
+def _encoded_dir_to_cwd(name: str) -> str:
+    # factory encodes the cwd by replacing "/" with "-". e.g. "-root-baseten"
+    if name.startswith("-"):
+        return "/" + name[1:]
+    return name
+
+
+def resolve_session(arg: str) -> dict:
+    cands = factory_session_candidates()
+    if arg == "last":
+        if not cands:
+            raise SystemExit("no droid sessions found under " + FACTORY)
+        return cands[0]
+    for c in cands:
+        if c["id"].startswith(arg) or arg.startswith(c["id"]):
+            return c
+    # fall back to a literal path
+    if os.path.isfile(arg):
+        return {"id": "manual-" + hashlib.sha1(arg.encode()).hexdigest()[:12],
+                "path": arg, "cwd": _guess_cwd_from_path(arg), "mtime": os.stat(arg).st_mtime}
+    raise SystemExit("no droid session matching: " + arg)
+
+
+def _guess_cwd_from_path(path: str) -> str:
+    parent = os.path.basename(os.path.dirname(path))
+    return _encoded_dir_to_cwd(parent)
+
+
+# --------------------------------------------------------------------------- droid parse
+
+
+def parse_droid(path: str) -> dict:
+    start = None
+    msgs = []
+    todos = []
+    compactions = []
+    with open(path, "r", encoding="utf-8", errors="replace") as fh:
+        for line in fh:
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                o = json.loads(line)
+            except Exception:
+                continue
+            t = o.get("type")
+            if t == "session_start":
+                start = o
+            elif t == "message":
+                msgs.append(o)
+            elif t == "todo_state":
+                todos.append(o)
+            elif t == "compaction_state":
+                compactions.append(o)
+    if start is None and msgs:
+        start = {"id": "unknown", "cwd": _guess_cwd_from_path(path),
+                 "title": "Imported droid session"}
+    return {"start": start, "messages": msgs, "todos": todos,
+            "compactions": compactions}
+
+
+def _iso_to_ms(s: str | None) -> int:
+    if not s:
+        return 0
+    try:
+        if s.endswith("Z"):
+            s = s[:-1] + "+00:00"
+        return int(_dt.datetime.fromisoformat(s).timestamp() * 1000)
+    except Exception:
+        return 0
+
+
+# A content block is a droid/agent system reminder worth dropping on import.
+_REMINDER = "<system-reminder>"
+
+
+def _block_text_visible(b: dict, role: str) -> str | None:
+    if b.get("type") != "text":
+        return None
+    vis = b.get("visibility")
+    text = b.get("text", "")
+    # drop llm-only injected reminders for user turns
+    if role == "user" and (vis == "llm_only" or text.lstrip().startswith(_REMINDER)):
+        return None
+    return text
+
+
+def _result_to_text(content) -> str:
+    if content is None:
+        return ""
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        parts = []
+        for b in content:
+            if isinstance(b, dict):
+                if b.get("type") == "text" and b.get("text"):
+                    parts.append(b["text"])
+                elif b.get("type") == "image_url" or "image_url" in b:
+                    parts.append("[image]")
+            else:
+                parts.append(str(b))
+        return "\n".join(parts)
+    if isinstance(content, dict):
+        return json.dumps(content, ensure_ascii=False)
+    return str(content)
+
+
+def build_ops(transcript: dict):
+    """Turn a parsed droid transcript into an ordered list of opencode rows.
+
+    Returns dict with: model, project_cwd, title, messages (list), stats.
+    Each opencode message is a dict:
+      {role, id, parentID, time:{created, completed}, finish, parts:[...]}
+    parts are opencode part-data dicts (role-dependent shape is applied later).
+    """
+    start = transcript["start"]
+    cwd = start.get("cwd") or "/"
+    title = (start.get("title") or "Imported droid session").strip()
+    if not title.lower().startswith("droid"):
+        title = "[Droid] " + title
+
+    msgs = transcript["messages"]
+    tool_results: dict[str, tuple[str, bool]] = {}
+    ops: list[dict] = []
+    current_user_id: str | None = None
+
+    # Pre-pass: tool results follow their tool_use in the transcript, so collect
+    # the full {tool_use_id -> (output, is_error)} map before building ops.
+    for o in msgs:
+        mo = o.get("message", {})
+        if mo.get("role") != "user":
+            continue
+        cl = mo.get("content")
+        if not isinstance(cl, list):
+            continue
+        for b in cl:
+            if b.get("type") == "tool_result":
+                tid = b.get("tool_use_id")
+                if tid:
+                    tool_results[tid] = (_result_to_text(b.get("content")),
+                                         bool(b.get("is_error")))
+
+    for o in msgs:
+        m = o.get("message", {})
+        role = m.get("role")
+        if role not in ("user", "assistant"):
+            continue
+        content = m.get("content")
+        blocks = content if isinstance(content, list) else (
+            [{"type": "text", "text": content}] if isinstance(content, str) else []
+        )
+        did = o.get("id") or "msg"
+        ts = _iso_to_ms(o.get("timestamp"))
+
+        if role == "user":
+            results_here = [b for b in blocks if b.get("type") == "tool_result"]
+            visible = [t for b in blocks
+                       if (t := _block_text_visible(b, "user")) is not None]
+            if results_here and not visible:
+                continue  # pure tool-output turn -> folded into prior tool parts
+            if not visible:
+                continue
+            mid = "msg_droid_" + _sanitize(did)
+            current_user_id = mid
+            ops.append({
+                "role": "user", "id": mid, "parentId": None, "ts": ts,
+                "completed": ts, "finish": None,
+                "parts": [{"type": "text", "text": "\n\n".join(visible)}],
+            })
+            continue
+
+        # assistant
+        mid = "msg_droid_" + _sanitize(did)
+        parts: list[dict] = []
+        has_tools = False
+        for b in blocks:
+            bt = b.get("type")
+            if bt == "thinking":
+                parts.append({"type": "reasoning", "text": b.get("thinking", "")})
+            elif bt == "text":
+                txt = b.get("text", "")
+                if not txt.lstrip().startswith(_REMINDER):
+                    parts.append({"type": "text", "text": txt})
+            elif bt == "tool_use":
+                has_tools = True
+                tid = b.get("id") or ""
+                raw_name = b.get("name") or "tool"
+                raw_inp = b.get("input")
+                oc_name, inp = _map_tool_input(raw_name, raw_inp)
+                res = tool_results.get(tid) if tid else None
+                out_txt = res[0] if res else ""
+                is_err = res[1] if res else False
+                parts.append({"type": "tool", "tool": oc_name, "callID": tid,
+                              "input": inp, "output": out_txt, "is_error": is_err,
+                              "has_result": res is not None})
+        ops.append({
+            "role": "assistant", "id": mid, "parentId": current_user_id,
+            "ts": ts, "completed": ts, "finish": "tool-calls" if has_tools else "stop",
+            "parts": parts,
+        })
+
+    last_ts = _iso_to_ms(transcript["messages"][-1].get("timestamp")) if msgs else 0
+    return {
+        "cwd": cwd, "title": title, "messages": ops,
+        "start_ms": ops[0]["ts"] if ops else (start and _iso_to_ms(None) or 0),
+        "end_ms": last_ts,
+        "droid_id": (start or {}).get("id"),
+        "droid_parent": (start or {}).get("parent"),
+    }
+
+
+def _sanitize(s: str) -> str:
+    return re.sub(r"[^A-Za-z0-9_-]", "_", s)[:48]
+
+
+_DROID_TO_OC_TOOL = {
+    "Execute": "bash", "Bash": "bash",
+    "Read": "read",
+    "Edit": "edit",
+    "Grep": "grep",
+    "Glob": "glob",
+    "LS": "list",
+    "FetchUrl": "webfetch",
+    "WebSearch": "websearch",
+    "TodoWrite": "todowrite",
+}
+
+
+def _map_tool_input(name: str, inp: dict | str | None) -> tuple[str, dict]:
+    """Map a droid tool name + input to opencode's tool name + input shape."""
+    if isinstance(inp, str):
+        inp = {"value": inp}
+    inp = inp or {}
+    oc_name = _DROID_TO_OC_TOOL.get(name, name)
+    i = dict(inp)  # copy; we keep any extra keys opencode ignores
+    if name == "Execute":
+        i = {"command": inp.get("command") or inp.get("cmd") or "",
+             "workdir": inp.get("cwd") or inp.get("workdir") or inp.get("directory") or ""}
+        for k in ("summary", "riskLevel"):
+            if k in inp:
+                i[k] = inp[k]
+    elif name == "Read":
+        i = {"filePath": inp.get("file_path") or inp.get("filePath")}
+        if "offset" in inp:
+            i["offset"] = inp["offset"]
+        if "limit" in inp:
+            i["limit"] = inp["limit"]
+    elif name == "Edit":
+        i = {"filePath": inp.get("file_path") or inp.get("filePath"),
+             "oldString": inp.get("old_str") or inp.get("oldString"),
+             "newString": inp.get("new_str") or inp.get("newString")}
+    elif name == "Grep":
+        i = {"pattern": inp.get("pattern"), "path": inp.get("path")}
+        if inp.get("include"):
+            i["include"] = inp["include"]
+        if inp.get("output_mode"):
+            i["output_mode"] = inp["output_mode"]
+    elif name == "Glob":
+        pat = inp.get("patterns")
+        if isinstance(pat, str):
+            pat = pat.strip("[]\"' ").split("\",\"")
+        if isinstance(pat, list) and pat:
+            pat = pat[0]
+        i = {"pattern": pat or inp.get("pattern"), "path": inp.get("folder") or inp.get("path")}
+    elif name == "LS":
+        i = {"path": inp.get("directory_path") or inp.get("path")}
+    elif name == "FetchUrl":
+        i = {"url": inp.get("url")}
+    elif name == "WebSearch":
+        i = {"query": inp.get("query")}
+    elif name == "TodoWrite":
+        i = {"todos": inp.get("todos")}
+    return oc_name, i
+
+
+# --------------------------------------------------------------------------- opencode DB
+
+
+def detect_target_db() -> str:
+    best = None
+    for name in ("opencode.db", "opencode-next.db"):
+        p = os.path.join(OC_DIR, name)
+        if not os.path.isfile(p):
+            continue
+        if best is None or os.path.getmtime(p) > os.path.getmtime(best):
+            best = p
+    if best is None:
+        raise SystemExit("no opencode DB under " + OC_DIR)
+    return best
+
+
+def detect_schema(con: sqlite3.Connection) -> str:
+    """Return 'stable' (message+part) or 'next' (session_message)."""
+    cur = con.cursor()
+    try:
+        cur.execute("SELECT DISTINCT type FROM session_message")
+        types = {r[0] for r in cur.fetchall()}
+    except sqlite3.Error:
+        return "stable"
+    if {"user", "assistant"} <= types:
+        return "next"
+    # session_message exists but only holds model/agent-switched events
+    return "stable"
+
+
+def latest_version_for(con: sqlite3.Connection, schema: str) -> str:
+    try:
+        r = con.execute("SELECT version FROM session ORDER BY time_updated DESC LIMIT 1").fetchone()
+        return r[0] if r and r[0] else "1.17.12"
+    except sqlite3.Error:
+        return "1.17.12"
+
+
+def git_toplevel(cwd: str) -> str | None:
+    d = os.path.abspath(cwd)
+    while d and d != "/":
+        if os.path.isdir(os.path.join(d, ".git")) or os.path.isfile(os.path.join(d, ".git")):
+            return d
+        nd = os.path.dirname(d)
+        if nd == d:
+            break
+        d = nd
+    return None
+
+
+def ensure_project(cur, cwd: str) -> str:
+    top = git_toplevel(cwd)
+    if not top:
+        cur.execute("SELECT id FROM project WHERE id='global'")
+        if cur.fetchone() is None:
+            now = _now_ms()
+            cur.execute("INSERT INTO project(id, worktree, vcs, name, icon_url, "
+                        "icon_url_override, icon_color, time_created, time_updated, "
+                        "time_initialized, sandboxes, commands) "
+                        "VALUES('global','/',NULL,NULL,NULL,NULL,NULL,?,?,NULL,'[]',NULL)",
+                        (now, now))
+        return "global"
+    cur.execute("SELECT id FROM project WHERE worktree=?", (top,))
+    row = cur.fetchone()
+    if row:
+        return row[0]
+    pid = hashlib.sha1(top.encode()).hexdigest()
+    name = os.path.basename(top) or top
+    if name == top:
+        name = None
+    now = _now_ms()
+    cur.execute("INSERT INTO project(id, worktree, vcs, name, icon_url, icon_url_override, "
+                "icon_color, time_created, time_updated, time_initialized, sandboxes, commands) "
+                "VALUES(?,?,'git',?,NULL,NULL,NULL,?,?,NULL,'[]',NULL)",
+                (pid, top, name, now, now))
+    return pid
+
+
+def _now_ms() -> int:
+    return int(time.time() * 1000)
+
+
+def _rand_slug() -> str:
+    import random
+    return random.choice(ADJ) + "-" + random.choice(NOUN)
+
+
+def model_arg_to_parts(spec: str) -> tuple[str, str, str]:
+    """'baseten/zai-org/GLM-5.2' -> ('baseten', 'zai-org/GLM-5.2', variant)."""
+    spec = (spec or "").strip()
+    if "/" in spec:
+        provider, model = spec.split("/", 1)
+    else:
+        provider, model = "baseten", spec
+    return provider, model
+
+
+# --------------------------------------------------------------------------- write (stable)
+
+
+def write_stable(con, ops, model, version: str):
+    cur = con.cursor()
+    ses_id = "ses_droid_" + _sanitize(ops["droid_id"] or "session")
+    cur.execute("SELECT 1 FROM session WHERE id=?", (ses_id,))
+    exists = cur.fetchone() is not None
+    if exists and not getattr(write_stable, "replace", False):
+        return ("skip", ses_id)
+    if exists:
+        for tbl in ("part", "message", "session_message", "session_input",
+                    "session_context_epoch"):
+            try:
+                cur.execute("DELETE FROM %s WHERE session_id=?" % tbl, (ses_id,))
+            except sqlite3.Error:
+                pass
+        cur.execute("DELETE FROM session WHERE id=?", (ses_id,))
+
+    pid = ensure_project(cur, ops["cwd"])
+    provider, model_id, variant = model["provider"], model["model"], model["variant"]
+    now = _now_ms()
+    tc = ops["start_ms"] or now
+    tu = ops["end_ms"] or tc
+    session_model = json.dumps({"id": model_id, "providerID": provider, "variant": variant})
+    cur.execute(
+        "INSERT INTO session(id, project_id, workspace_id, parent_id, slug, directory, path, "
+        "title, version, share_url, summary_additions, summary_deletions, summary_files, "
+        "summary_diffs, metadata, cost, tokens_input, tokens_output, tokens_reasoning, "
+        "tokens_cache_read, tokens_cache_write, revert, permission, agent, model, "
+        "time_created, time_updated, time_compacting, time_archived) "
+        "VALUES(?,?,NULL,NULL,?,?,?,?,?,NULL,0,0,0,NULL,NULL,0,0,0,0,0,0,NULL,NULL,'build',?,?,?,NULL,NULL)",
+        (ses_id, pid, _rand_slug(), ops["cwd"], os.path.basename(ops["cwd"]) or "",
+         ops["title"], version, session_model, tc, tu))
+
+    clock = tc or _now_ms()
+    part_count = 0
+    msg_count = 0
+    for msg in ops["messages"]:
+        mid = msg["id"]
+        mtc = clock
+        msg_count += 1
+        if msg["role"] == "user":
+            mdata = {
+                "role": "user", "time": {"created": mtc}, "agent": "build",
+                "model": {"providerID": provider, "modelID": model_id, "variant": variant},
+                "summary": {"diffs": []},
+            }
+        else:
+            mdata = {
+                "parentId": msg["parentId"], "role": "assistant", "mode": "build",
+                "agent": "build", "variant": variant,
+                "path": {"cwd": ops["cwd"], "root": "/"},
+                "cost": 0,
+                "tokens": {"total": 0, "input": 0, "output": 0, "reasoning": 0,
+                           "cache": {"write": 0, "read": 0}},
+                "modelID": model_id, "providerID": provider,
+                "time": {"created": mtc, "completed": msg["completed"] or mtc},
+                "finish": msg["finish"] or "stop",
+            }
+        clock += 1
+        part_rows = _stable_parts(cur, ses_id, mid, msg, clock, provider, model_id, variant)
+        for prow in part_rows:
+            cur.execute(
+                "INSERT INTO part(id, message_id, session_id, time_created, time_updated, data) "
+                "VALUES(?,?,?,?,?,?)", prow)
+            clock = max(clock, prow[3]) + 1
+            part_count += 1
+        mu = clock - 1 if clock > mtc else mtc
+        cur.execute(
+            "INSERT INTO message(id, session_id, time_created, time_updated, data) "
+            "VALUES(?,?,?,?,?)", (mid, ses_id, mtc, mu, json.dumps(mdata)))
+    return ("insert", ses_id, pid, msg_count, part_count)
+
+
+def _stable_parts(cur, ses_id, mid, msg, clock, provider, model_id, variant):
+    """Return rows (id, message_id, session_id, time_created, time_updated, data)."""
+    rows = []
+    seq = 0
+
+    def pid_for() -> str:
+        return "prt_droid_%s_%d" % (_sanitize(mid.replace("msg_droid_", "")), seq)
+
+    def add(data, t):
+        nonlocal seq
+        seq += 1
+        tcr = t
+        tc = tcr
+        rows.append((pid_for(), mid, ses_id, tc, tc, json.dumps(data, ensure_ascii=False)))
+
+    t = clock
+    if msg["role"] == "user":
+        for p in msg["parts"]:
+            if p["type"] == "text":
+                add({"type": "text", "text": p["text"]}, t)
+                t += 1
+        return rows
+
+    # assistant: step-start, content, step-finish
+    add({"type": "step-start"}, t)
+    t += 1
+    for p in msg["parts"]:
+        if p["type"] == "reasoning":
+            add({"type": "reasoning", "text": p["text"],
+                 "time": {"start": t, "end": t}}, t)
+            t += 1
+        elif p["type"] == "text":
+            add({"type": "text", "text": p["text"]}, t)
+            t += 1
+        elif p["type"] == "tool":
+            status = "failed" if p["is_error"] else ("completed" if p["has_result"] else "pending")
+            state = {"status": status, "input": p["input"], "output": p["output"]}
+            add({"type": "tool", "tool": p["tool"], "callID": p["callID"],
+                 "state": state}, t)
+            t += 1
+    add({"type": "step-finish", "reason": msg["finish"] or "stop",
+         "tokens": {"total": 0, "input": 0, "output": 0, "reasoning": 0,
+                    "cache": {"write": 0, "read": 0}}, "cost": 0}, t)
+    return rows
+
+
+# --------------------------------------------------------------------------- write (next)
+
+
+def write_next(con, ops, model, version: str):
+    cur = con.cursor()
+    ses_id = "ses_droid_" + _sanitize(ops["droid_id"] or "session")
+    cur.execute("SELECT 1 FROM session WHERE id=?", (ses_id,))
+    exists = cur.fetchone() is not None
+    if exists and not getattr(write_next, "replace", False):
+        return ("skip", ses_id)
+    if exists:
+        cur.execute("DELETE FROM session WHERE id=?", (ses_id,))
+    pid = ensure_project(cur, ops["cwd"])
+    provider, model_id, variant = model["provider"], model["model"], model["variant"]
+    now = _now_ms()
+    tc = ops["start_ms"] or now
+    tu = ops["end_ms"] or tc
+    session_model = json.dumps({"id": model_id, "providerID": provider, "variant": variant})
+    cur.execute(
+        "INSERT INTO session(id, project_id, workspace_id, parent_id, slug, directory, path, "
+        "title, version, share_url, summary_additions, summary_deletions, summary_files, "
+        "summary_diffs, metadata, cost, tokens_input, tokens_output, tokens_reasoning, "
+        "tokens_cache_read, tokens_cache_write, revert, permission, agent, model, "
+        "time_created, time_updated, time_compacting, time_archived) "
+        "VALUES(?,?,NULL,NULL,?,?,?,?,?,NULL,0,0,0,NULL,NULL,0,0,0,0,0,0,NULL,NULL,'build',?,?,?,NULL,NULL)",
+        (ses_id, pid, _rand_slug(), ops["cwd"], os.path.basename(ops["cwd"]) or "",
+         ops["title"], version, session_model, tc, tu))
+
+    seq = 0
+    clock = tc
+    for msg in ops["messages"]:
+        seq += 1
+        mid = msg["id"]
+        if msg["role"] == "user":
+            text_parts = [p["text"] for p in msg["parts"] if p["type"] == "text"]
+            data = {"time": {"created": clock}, "text": "\n\n".join(text_parts),
+                    "files": [], "agents": []}
+            data = json.dumps(data, ensure_ascii=False)
+            cur.execute(
+                "INSERT INTO session_message(id, session_id, type, seq, time_created, time_updated, data) "
+                "VALUES(?,?, 'user', ?, ?, ?, ?)",
+                (mid, ses_id, seq, clock, clock, data))
+            clock += 1
+        else:
+            content = []
+            for p in msg["parts"]:
+                if p["type"] == "reasoning":
+                    rid = "reasoning-%d" % len(content)
+                    content.append({"type": "reasoning", "id": rid, "text": p["text"],
+                                    "time": {"created": clock, "completed": clock + 1}})
+                elif p["type"] == "text":
+                    content.append({"type": "text", "text": p["text"]})
+                elif p["type"] == "tool":
+                    status = "failed" if p["is_error"] else ("completed" if p["has_result"] else "pending")
+                    content.append({
+                        "type": "tool", "id": p["callID"] or "tool-%d" % len(content),
+                        "name": p["tool"], "provider": {"executed": p["has_result"]},
+                        "state": {"status": status, "input": p["input"],
+                                  "content": [{"type": "text", "text": p["output"]}],
+                                  "outputPaths": [], "structured": {}},
+                        "time": {"created": clock, "ran": clock, "completed": clock + 1},
+                    })
+            data = {
+                "time": {"created": clock, "completed": msg["completed"] or clock},
+                "agent": "build",
+                "model": {"id": model_id, "providerID": provider, "variant": variant},
+                "content": content, "snapshot": {"start": None, "end": None, "files": []},
+                "finish": msg["finish"] or "stop", "cost": 0,
+                "tokens": {"input": 0, "output": 0, "reasoning": 0,
+                           "cache": {"read": 0, "write": 0}},
+            }
+            cur.execute(
+                "INSERT INTO session_message(id, session_id, type, seq, time_created, time_updated, data) "
+                "VALUES(?,?, 'assistant', ?, ?, ?, ?)",
+                (mid, ses_id, seq, clock, clock, json.dumps(data, ensure_ascii=False)))
+            clock += 1
+    return ("insert", ses_id, pid, seq, 0)
+
+
+# --------------------------------------------------------------------------- opencode running
+
+
+def opencode_running() -> list[int]:
+    """Return pids of any opencode server processes alive."""
+    pids = []
+    for p in os.listdir("/proc") if os.path.isdir("/proc") else []:
+        if not p.isdigit():
+            continue
+        try:
+            comm = open("/proc/%s/comm" % p).read().strip()
+            if comm in ("opencode", "opencode2"):
+                pids.append(int(p))
+        except Exception:
+            continue
+    return pids
+
+
+# --------------------------------------------------------------------------- main
+
+
+def main():
+    ap = argparse.ArgumentParser(
+        prog="droid-to-opencode",
+        description="Import a Factory 'droid' session into opencode so it can be resumed there.")
+    ap.add_argument("session", nargs="?", help="droid session id (or 'last', or a path)")
+    ap.add_argument("--list", action="store_true", help="list droid sessions and exit")
+    ap.add_argument("--apply", action="store_true", help="write into opencode (default: dry-run)")
+    ap.add_argument("--replace", action="store_true", help="overwrite an existing import")
+    ap.add_argument("--db", help="target opencode DB path (auto-detected by default)")
+    ap.add_argument("--schema", choices=["auto", "stable", "next"], default="auto")
+    ap.add_argument("--model", default="baseten/zai-org/GLM-5.2",
+                    help="opencode model spec provider/modelID (default: baseten/zai-org/GLM-5.2)")
+    ap.add_argument("--variant", default="max", help="model variant (default: max)")
+    ap.add_argument("--force", action="store_true",
+                    help="apply even if opencode appears to be running")
+    ap.add_argument("--no-backup", action="store_true", help="skip DB backup before apply")
+    args = ap.parse_args()
+
+    if args.list:
+        _print_list()
+        return
+    if not args.session:
+        ap.error("session id required (or use --list). Example: droid-to-opencode last --apply")
+
+    spec = resolve_session(args.session)
+    transcript = parse_droid(spec["path"])
+    ops = build_ops(transcript)
+    if not ops["messages"]:
+        raise SystemExit("no transcribable messages in " + spec["path"])
+
+    provider, model_id = model_arg_to_parts(args.model)
+    model = {"provider": provider, "model": model_id, "variant": args.variant}
+
+    db = args.db or detect_target_db()
+    con = sqlite3.connect(db, timeout=60.0, isolation_level=None)
+    con.row_factory = sqlite3.Row
+    schema = args.schema
+    if schema == "auto":
+        schema = detect_schema(con)
+    version = latest_version_for(con, schema)
+
+    _print_plan(spec, ops, db, schema, version, model)
+    if not args.apply:
+        print("\nDRY RUN — no changes made. Re-run with --apply to write into opencode.")
+        return
+
+    # ---- apply ----
+    if not args.force and opencode_running():
+        print("\nERROR: opencode is currently running (pid(s) above). Writing to its\n"
+              "SQLite DB while it runs can race with its own writes.\n"
+              "  1) quit opencode,  2) run this command again with --apply,\n"
+              "  3) restart opencode to see the imported session.\n"
+              "Or proceed anyway with --force (a backup is taken first).")
+        return
+
+    if not args.no_backup:
+        bak = db + ".droidimport.bak.%d" % int(time.time())
+        shutil.copy2(db, bak)
+        print("\nBackup written: " + bak)
+
+    try:
+        _acquire_busy(con)
+        if schema == "stable":
+            write_stable.replace = args.replace
+            res = write_stable(con, ops, model, version)
+        else:
+            write_next.replace = args.replace
+            res = write_next(con, ops, model, version)
+        con.commit()
+    finally:
+        con.close()
+
+    if res[0] == "skip":
+        print("\nSKIPPED: session already imported as %s . Use --replace to overwrite." % res[1])
+        return
+    _ = res
+    kind, ses_id, pid, msg_count, part_count = res
+    print("\nIMPORTED %s session:" % kind.upper())
+    print("  session id : " + ses_id)
+    print("  project id : " + str(pid))
+    print("  messages   : %d" % msg_count)
+    if schema == "stable":
+        print("  parts      : %d" % part_count)
+    print("  target db  : %s (%s schema)" % (db, schema))
+    print("\nRestart opencode, then resume with:\n  opencode --resume %s" % ses_id)
+
+
+def _acquire_busy(con):
+    con.execute("PRAGMA busy_timeout=60000")
+    con.execute("BEGIN")
+
+
+def _print_list():
+    rows = factory_session_candidates()
+    if not rows:
+        print("no droid sessions under " + FACTORY)
+        return
+    print("%-36s  %-10s  %-6s  %s" % ("SESSION ID", "CWD", "SIZE", "MODIFIED"))
+    for r in rows[:50]:
+        print("%-36s  %-10s  %-6d  %s" % (
+            r["id"][:36], r["cwd"], r["size"],
+            _dt.datetime.fromtimestamp(r["mtime"]).strftime("%Y-%m-%d %H:%M")))
+
+
+def _print_plan(spec, ops, db, schema, version, model):
+    print("=" * 70)
+    print("droid-to-opencode")
+    print("=" * 70)
+    print("droid session : %s" % spec["id"])
+    print("transcript    : %s" % spec["path"])
+    print("cwd           : %s" % ops["cwd"])
+    print("title         : %s" % ops["title"])
+    print("droid parent  : %s" % ops["droid_parent"])
+    u = sum(1 for m in ops["messages"] if m["role"] == "user")
+    a = sum(1 for m in ops["messages"] if m["role"] == "assistant")
+    print("messages      : %d total (%d user, %d assistant)" % (len(ops["messages"]), u, a))
+    print("target db     : %s" % db)
+    print("schema        : %s  (opencode version %s)" % (schema, version))
+    print("import model  : %s/%s [%s]" % (model["provider"], model["model"], model["variant"]))
+    new_id = "ses_droid_" + _sanitize(ops["droid_id"] or "session")
+    print("new session id: %s" % new_id)
+    # preview first user + first assistant
+    first_user = next((m for m in ops["messages"] if m["role"] == "user"), None)
+    if first_user:
+        txt = next((p["text"] for p in first_user["parts"] if p["type"] == "text"), "")
+        print("\nfirst user prompt:\n  " + (txt[:200].replace("\n", "\n  ") + ("..." if len(txt) > 200 else "")))
+
+
+if __name__ == "__main__":
+    main()

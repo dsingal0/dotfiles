@@ -24,6 +24,7 @@ machine.
 - **uv** (Python package manager)
 - **Factory CLI** (`droid`)
 - **paseo** (`@getpaseo/cli`)
+- **droid-to-opencode** user script (imports a Factory "droid" session into opencode so it can be resumed there); symlinked into `~/.local/bin`
 - git identity (name + email) configured globally
 
 ## Notes
