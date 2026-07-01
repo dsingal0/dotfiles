@@ -19,10 +19,30 @@ else
   ADO="apt-get"
 fi
 $ADO update -y || true
-$ADO install -y btop tmux libclang-dev tree || true
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+$ADO install -y btop libclang-dev tree libevent-dev libncurses-dev build-essential bison || true
+
+# Install/update tmux (build latest from source — apt ships an old version)
+echo "Installing tmux..."
+TMUX_VERSION="3.7a"
+if ! tmux -V 2>/dev/null | grep -q "$TMUX_VERSION"; then
+  TMUX_TMP="$(mktemp -d)"
+  curl -fsSL "https://github.com/tmux/tmux/releases/download/${TMUX_VERSION}/tmux-${TMUX_VERSION}.tar.gz" -o "$TMUX_TMP/tmux.tar.gz"
+  tar -xzf "$TMUX_TMP/tmux.tar.gz" -C "$TMUX_TMP"
+  (
+    cd "$TMUX_TMP/tmux-${TMUX_VERSION}" && ./configure --prefix=/usr/local && make -j$(nproc)
+    if [[ "${EUID:-$(id -u)}" -eq 0 ]]; then
+      make install
+    else
+      sudo make install
+    fi
+  )
+  rm -rf "$TMUX_TMP"
+  tmux -V
+fi
 
 # Symlink tmux config (enables mouse scroll passthrough for Droid in tmux)
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ln -sf "$SCRIPT_DIR/tmux.conf" "$HOME/.tmux.conf"
 # Reload config into running tmux server, if any
 tmux source-file "$HOME/.tmux.conf" 2>/dev/null || true
