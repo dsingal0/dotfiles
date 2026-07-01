@@ -100,6 +100,18 @@ append_once "$HOME/.bashrc" 'export PATH="$HOME/.local/bin:$PATH"'
 echo "Installing uv..."
 curl -LsSf https://astral.sh/uv/install.sh | sh
 
+# Install/update Rust and Cargo
+echo "Installing Rust..."
+if command -v rustup >/dev/null 2>&1; then
+  rustup update stable
+else
+  curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
+fi
+# Ensure cargo/rustc are on PATH for the rest of this script
+\. "$HOME/.cargo/env" 2>/dev/null || true
+rustc --version
+cargo --version
+
 # Install/update Factory CLI
 echo "Installing Factory CLI..."
 curl -fsSL https://app.factory.ai/cli | sh
