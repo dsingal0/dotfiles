@@ -33,6 +33,39 @@ done
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ln -sf "$SCRIPT_DIR/tmux.conf" "$HOME/.tmux.conf"
 
+# Manage ~/.baseten_aliases (create if missing) and ensure the `ksh` shell helper
+# is defined. Keeps a copy in the dotfiles repo for version control.
+ALIASES_FILE="$HOME/.baseten_aliases"
+python3 - "$ALIASES_FILE" << 'PYEOF'
+import re, sys
+
+path = sys.argv[1]
+try:
+    with open(path, "r") as f:
+        content = f.read()
+except FileNotFoundError:
+    content = ""
+
+ksh_block = '''# >>> ksh (managed by brew-setup.sh) >>>
+ksh() {
+  kubectl exec -it "$1" -- env TERM=xterm-256color COLORTERM=truecolor /bin/bash
+}
+# <<< ksh <<<'''
+
+# Replace any existing managed block (or remove a stale one), then append fresh
+content = re.sub(r'\n?# >>> ksh \(managed by brew-setup\.sh\) >>>.*?# <<< ksh <<<\n?', '\n', content, flags=re.DOTALL)
+content = content.rstrip()
+if content:
+    content += "\n\n"
+content += ksh_block + "\n"
+
+with open(path, "w") as f:
+    f.write(content)
+PYEOF
+
+# Keep a copy in the dotfiles repo
+cp "$ALIASES_FILE" "$SCRIPT_DIR/baseten_aliases"
+
 # Install/update opencode (stable)
 echo "Installing opencode..."
 npm i -g opencode-ai

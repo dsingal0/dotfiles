@@ -1,0 +1,5 @@
+# >>> ksh (managed by brew-setup.sh) >>>
+ksh() {
+  kubectl exec -it "$1" -- env TERM=xterm-256color COLORTERM=truecolor /bin/bash
+}
+# <<< ksh <<<
