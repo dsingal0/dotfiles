@@ -113,9 +113,26 @@ curl -fsSL https://app.factory.ai/cli | sh
 # echo "Installing Cursor CLI..."
 # curl https://cursor.com/install -fsS | bash
 
-# Install/update paseo
+# Install/update paseo (pre-release track via the `beta` dist-tag)
 echo "Installing paseo..."
-npm install -g @getpaseo/cli && paseo
+npm install -g @getpaseo/cli@beta && paseo
+
+# Install/update rtk (Rust Token Killer) - CLI proxy that cuts LLM token usage.
+# Single Rust binary in ~/.local/bin; ensure that dir is on PATH for this script
+# (the .bashrc append below only applies to future shells).
+export PATH="$HOME/.local/bin:$PATH"
+echo "Installing rtk..."
+curl -fsSL https://raw.githubusercontent.com/rtk-ai/rtk/refs/heads/master/install.sh | sh
+rtk --version
+
+# Initialize rtk hooks for the agents I use that rtk supports natively.
+# OpenCode (plugin) and Cursor (preToolUse hook in ~/.cursor/hooks.json).
+# Cursor uses --hook-only --no-patch so it skips the Claude Code RTK.md /
+# CLAUDE.md / settings.json artifacts (I don't use Claude Code).
+# Note: rtk has no native Droid/Factory integration; Droid is not wired here.
+RTK_TELEMETRY_DISABLED=1 rtk init -g --opencode
+RTK_TELEMETRY_DISABLED=1 rtk init -g --agent cursor --hook-only --no-patch
+rtk init --show
 
 # Configure git identity for remote dev pods (idempotent)
 echo "Configuring git identity..."

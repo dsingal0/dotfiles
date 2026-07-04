@@ -228,8 +228,8 @@ with open(settings_path, "w") as f:
 PYEOF
 fi
 
-# Install paseo CLI via npm (latest npm from brew's node formula)
-npm install -g @getpaseo/cli
+# Install paseo CLI via npm (pre-release track via the `beta` dist-tag, latest npm from brew's node formula)
+npm install -g @getpaseo/cli@beta
 
 # Remove stale downloads and old versions
 brew cleanup --prune=all
