@@ -66,6 +66,27 @@ echo "Installing opencode..."
 npm i -g opencode-ai || curl -fsSL https://opencode.ai/install | bash
 opencode --version
 
+# Ensure ~/.config/opencode/opencode.json has permission: allow (merged with
+# any existing keys, e.g. an mcp servers block set elsewhere).
+mkdir -p ~/.config/opencode
+python3 - << 'PYEOF'
+import json, os
+
+path = os.path.expanduser("~/.config/opencode/opencode.json")
+try:
+    with open(path, "r") as f:
+        config = json.load(f)
+except (FileNotFoundError, json.JSONDecodeError):
+    config = {}
+
+config.setdefault("$schema", "https://opencode.ai/config.json")
+config["permission"] = "allow"
+
+with open(path, "w") as f:
+    json.dump(config, f, indent=2)
+    f.write("\n")
+PYEOF
+
 # Install droid via npm
 npm config set allow-scripts="droid,opencode-ai" --location=user
 npm install -g droid
@@ -267,15 +288,15 @@ baseten_models = [
         "maxOutputTokens": 8192,
         "noImageSupport": False
     },
-    {
-        "model": "zai-org/GLM-5.2-1M",
-        "displayName": "GLM 5.2 1M [Baseten]",
-        "baseUrl": "https://inference.baseten.co/v1",
-        "apiKey": api_key,
-        "provider": "generic-chat-completion-api",
-        "maxOutputTokens": 8192,
-        "noImageSupport": True
-    }
+    # {
+    #     "model": "zai-org/GLM-5.2-1M",
+    #     "displayName": "GLM 5.2 1M [Baseten]",
+    #     "baseUrl": "https://inference.baseten.co/v1",
+    #     "apiKey": api_key,
+    #     "provider": "generic-chat-completion-api",
+    #     "maxOutputTokens": 8192,
+    #     "noImageSupport": True
+    # }
 ]
 
 existing = {m.get("model"): i for i, m in enumerate(settings["customModels"])}

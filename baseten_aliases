@@ -1,3 +1,313 @@
+# This file contains aliases and shell functions that are useful during development in the baseten
+# monorepo as well as common tasks while working on the baseten platform.
+#
+# Install this on your user profile by running: bin/install_aliases.sh
+#
+# Please make any changes to bin/baseten_aliases.sh in the monorepo and rerun the install
+# script for them to take effect.
+
+# -----------------
+# kubectl shortcuts
+# -----------------
+
+alias k='kubectl'
+alias kg='kubectl get'
+alias kgp='kubectl get pods'
+alias kgpa='kubectl get pods -A'
+alias kgs='kubectl get svc'
+alias kgd='kubectl get deployments'
+alias krm='kubectl delete'
+alias ka='kubectl apply'
+alias kd='kubectl describe'
+alias kdsvc='kubectl describe service'
+alias kddep='kubectl describe deployment'
+alias kdp='kubectl describe pod'
+alias kdn='kubectl describe node'
+alias klo='kubectl logs -f'
+alias kex='kubectl exec -it'
+
+# Pipes output of k describe to less
+kdl() {
+  kubectl describe $* | less
+}
+alias kdpl='kdl pod'
+alias kdnl='kdl node'
+
+commit() {
+
+    # Check if a comment argument is provided
+    if [ -z "$1" ]; then
+    echo "Usage: $0 <commit_message>"
+    exit 1
+    fi
+
+    comment="$1"
+    previous_output=""
+
+    # Define the regex pattern to match the desired output format
+    pattern="[0-9]+ files? changed"
+
+    while true; do
+    git add .
+
+    # Use a temporary file to capture the output
+    temp_file=$(mktemp)
+
+    # Stream the output of the git commit command and capture it
+    git commit -m "$comment" 2>&1 | tee "$temp_file"
+    output=$(cat "$temp_file")
+
+    # Save the exit status of the git commit command
+    commit_exit_status=$?
+
+    # Print the output to the terminal
+    echo "$output"
+
+    # Check if the output matches the desired pattern
+    if [[ $output =~ $pattern ]]; then
+        echo "Commit successful with matching output:"
+        echo "$output"
+        break
+    fi
+
+    # Check if the output is the same as the previous attempt
+    if [[ "$output" == "$previous_output" ]]; then
+        echo "Output is the same as the previous attempt. Exiting."
+        break
+    else
+        previous_output="$output"
+    fi
+
+    # Remove the temporary file
+    rm "$temp_file"
+    done
+
+}
+
+# Get a shell in a pod
+# Usage: ksh <podname>
+ksh() {
+  kubectl exec -it $1 -- /bin/bash
+}
+
+# Get a shell or run a command in a django pod
+# Usage:
+# kshd  # get a shell
+# kshd <command> <args...>  # run a command
+kshd() {
+  DJANGO_POD=$(kubectl get pods -n baseten -o name | grep celery-worker | awk -F/ '{ print $2 }' | head -n 1)
+  if [ $# -eq 0 ]; then
+    kubectl exec -it -n baseten -c celery-worker $DJANGO_POD -- /bin/bash
+  else
+    kubectl exec -it -n baseten -c celery-worker $DJANGO_POD -- "$@"
+  fi
+}
+
+kshp() {
+  kshd uv run python manage.py shell_plus
+}
+
+# Change the current context's namespace
+ksns() {
+  kubectl config set-context --current --namespace=$1
+}
+
+kgnr() {
+  local CPU="CPU:status.allocatable.cpu"
+  local MEMORY="MEMORY:status.allocatable.memory"
+  local GPU="GPU:status.allocatable.nvidia\.com/gpu"
+  local NAME="NAME:metadata.name"
+  kubectl get nodes -o custom-columns="$NAME,$CPU,$MEMORY,$GPU"
+}
+
+# run a debug pod
+alias kdebug='kubectl run -i --tty --rm debug --image=alpine --restart=Never -- /bin/sh'
+
+# Debug with overrides, eg `kdebugo --overrides='{"spec": { "nodeName": "ip-192-168-73-233.us-west-2.compute.internal"}}'`
+# To get a debug pod on a specific node
+kdebugo() {
+  kubectl run -i --tty --rm debug --image=alpine --restart=Never $1 -- /bin/sh
+}
+
+org2ns() {
+  kubectl get namespace -l organization.baseten.co=$1 -o jsonpath='{.items[0].metadata.name}'
+}
+
+# Change the namespace based on org name
+ksorg() {
+  NAMESPACE=$(kubectl get namespace -l organization.baseten.co=$1 -o jsonpath='{.items[0].metadata.name}')
+  echo "Setting namespace to $NAMESPACE"
+  kubectl config set-context --current --namespace=$NAMESPACE
+}
+
+# Maps a namespace to an organization
+ns2org() {
+  kubectl get namespace $1 -o go-template --template='{{index .metadata.labels "organization.baseten.co" -}}'
+}
+
+# Get all the pods running on a node
+# Usage: kgnp <node name>
+kgnp() {
+    kubectl get pods --all-namespaces -o wide --field-selector spec.nodeName=$1
+}
+
+# --------------------------------
+# Cloud-provider specific commands
+# --------------------------------
+
+# Connect to node via SSM (get node name from `kubectl get nodes` or elsewhere)
+# Note - this only works for AWS clusters
+kssh-node() {
+  NODE_ID=$(kubectl get node -o jsonpath="{.spec.providerID}" $1 | sed -e 's/.*\///')
+  aws ssm start-session --target $NODE_ID
+}
+
+# aws-vault sync - Sets the kube context based on the current AWS vault name
+# See docs/local-dev/AWS-&-Terraform-Setup.md for setup
+# Usage: avs   # no args needed
+avs() {
+  # By overriding this, we keep the kubeconfig scoped to the current env
+  export KUBECONFIG=~/.kube/$AWS_VAULT.config
+  aws eks update-kubeconfig --name $AWS_VAULT
+}
+
+# aws-vault refresh - Refreshes the aws-vault permissions after a timeout
+# Usage: avr   # no args needed
+avr() {
+  local AWS_VAULT_ORIG=$AWS_VAULT
+  (AWS_VAULT="" aws-vault exec $AWS_VAULT_ORIG -- /bin/bash -c "export | grep AWS_") >/tmp/aws_creds.txt
+  source /tmp/aws_creds.txt
+  rm /tmp/aws_creds.txt
+}
+
+# gks set - Sets the kube context to the given environment
+# Usage: gks [prod|staging|dev] # uses first WP for each environment
+# Usage: gks <workload-plane-name>
+gkss() {
+  case $1 in
+  prod|us-east4-prod-1)
+    local PROJECT_NAME=production-workload-plane-1
+    local CLUSTER_NAME=us-east4-prod-1
+    local REGION=us-east4
+    ;;
+  us-central1-prod-1)
+    local PROJECT_NAME=production-wp-us-central-1
+    local CLUSTER_NAME=us-central1-prod-1
+    local REGION=us-central1
+    ;;
+  staging|us-central1-staging)
+    local PROJECT_NAME=staging-workload-plane-1
+    local CLUSTER_NAME=us-central1-staging
+    local REGION=us-central1
+    ;;
+  dev|wp-gcp-us-central1-dev)
+    local PROJECT_NAME=multi-cluster-gcp
+    local CLUSTER_NAME=wp-gcp-us-central1-dev
+    local REGION=us-central1
+    ;;
+  *)
+    echo "Unknown environment $1"
+    return 1
+    ;;
+  esac
+  export KUBECONFIG=~/.kube/gke_$1.config
+  gcloud container clusters get-credentials $CLUSTER_NAME --region $REGION --project $PROJECT_NAME
+}
+
+# -----------------
+# backend shortcuts
+# -----------------
+
+# NB(nikhil): Maintaining the old aliases for poetry, but we've since migrated to `uv`.
+alias pr='uv run'
+alias ur='uv run'
+alias prp='uv run python'
+alias urp='uv run python'
+alias manage='uv run python manage.py'
+
+alias tmux-attach='tmux attach-session -t dev-session'
+alias tmux-kill='tmux kill-session -t dev-session'
+
+# Run unit tests
+alias ut="uv run pytest -m 'not local_integration and not session_manager and not integration and not metrics_integration'"
+
+# -----------------
+# training shortcuts
+# -----------------
+
+mark_training_node_expired() {
+  if [ -z "$1" ]; then
+    echo "Usage: mark_training_node_expired <node_name>"
+    return 1
+  fi
+  NODE=$(kubectl get node $1 -o jsonpath='{.metadata.name}')
+  if [ -z "$NODE" ]; then
+    echo "Node $1 not found"
+    return 1
+  fi
+  kubectl taint node $1 baseten-internal/training-manual-no-schedule=present:NoSchedule
+  kubectl label node $1 baseten-internal/training-manual-no-schedule=present
+  # get the overprovisioning pod on the input node and delete it. This will cause it to reschedule, which it will be forced to do
+  # on the next node.
+  # Find the the pod that is deployed on the input node and delete it.
+  OVERPROVISIONING_POD=$(kubectl get pods -n overprovisioning -l app=hold-flex-dws-h100-4b-1b-training -o json | jq -r ".items[] | select(.spec.nodeName == \"$1\") | .metadata.name" | head -n 1)
+  kubectl delete pod -n overprovisioning $OVERPROVISIONING_POD
+  echo "Marked node $1 as expired"
+}
+
+unmark_training_node_expired() {
+  if [ -z "$1" ]; then
+    echo "Usage: unmark_training_node_expired <node_name>"
+    return 1
+  fi
+  NODE=$(kubectl get node $1 -o jsonpath='{.metadata.name}')
+  if [ -z "$NODE" ]; then
+    echo "Node $1 not found"
+    return 1
+  fi
+  kubectl taint node $1 baseten-internal/training-manual-no-schedule-
+  kubectl label node --overwrite $1 baseten-internal/training-manual-no-schedule-
+  echo "Unmarked node $1 as expired"
+}
+
+update_baseten_shared_core_product() {
+  # presumes this is ran within container
+  cd /workspace
+  cd baseten_shared
+  uv sync
+  echo "Updated baseten_shared"
+  cd ../backend
+  uv sync
+  echo "Updated backend"
+  cd ../operator
+  uv sync
+  echo "Updated operator"
+}
+
+# --------------------------
+# db port-forward shortcut
+# --------------------------
+kpfdb() {
+  # Forward local port to django or mcm postgres instances
+  # $1: db name: django,mcm
+  # $2: local port (optional) default: django=6432, mcm=5432
+  # $3: namespace (optional) default: baseten
+  DB_NAME=$1
+  NAMESPACE=${3:-baseten}
+  if [ "$DB_NAME" = "django" ]; then
+    LOCAL_PORT=${2:-6432}
+    DB_POD=$(kubectl get pod -n $NAMESPACE -l app=baseten-django-pgbouncer -o jsonpath="{.items[0].metadata.name}")
+    kubectl port-forward -n $NAMESPACE $DB_POD $LOCAL_PORT:6432
+  elif [ "$DB_NAME" = "mcm" ]; then
+    LOCAL_PORT=${2:-5432}
+    DB_POD=$(kubectl get pod -n $NAMESPACE -l postgres-operator.crunchydata.com/cluster=mcm-postgres -l postgres-operator.crunchydata.com/role=master -o jsonpath="{.items[0].metadata.name}")
+    kubectl port-forward -n $NAMESPACE $DB_POD $LOCAL_PORT:5432
+  else
+    echo "Unknown database $DB_NAME"
+    return 1
+  fi
+}
+
 # >>> ksh (managed by brew-setup.sh) >>>
 ksh() {
   kubectl exec -it "$1" -- env TERM=xterm-256color COLORTERM=truecolor /bin/bash

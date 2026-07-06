@@ -18,16 +18,20 @@ brew tap manaflow-ai/cmux
 FORMULAS=(croc gh node mole rtk tmux)
 CASKS=(brave-browser@beta cmux cursor-cli)
 
-# Install (no-op if already installed) then upgrade to latest
+# Install (no-op if already installed)
 for pkg in "${FORMULAS[@]}"; do
   brew install "$pkg"
-  brew upgrade "$pkg"
 done
 
 for pkg in "${CASKS[@]}"; do
   brew install --cask "$pkg"
-  brew upgrade --cask "$pkg"
 done
+
+# Upgrade all installed packages (formulae and casks)
+echo "Checking for outdated packages..."
+brew outdated --greedy || true
+brew upgrade
+brew upgrade --greedy
 
 # Symlink tmux config (enables mouse scroll passthrough for Droid in tmux)
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -70,6 +74,27 @@ cp "$ALIASES_FILE" "$SCRIPT_DIR/baseten_aliases"
 echo "Installing opencode..."
 npm i -g opencode-ai
 opencode --version
+
+# Ensure ~/.config/opencode/opencode.json has permission: allow (merged with
+# any existing keys, e.g. an mcp servers block set elsewhere).
+mkdir -p ~/.config/opencode
+python3 - << 'PYEOF'
+import json, os
+
+path = os.path.expanduser("~/.config/opencode/opencode.json")
+try:
+    with open(path, "r") as f:
+        config = json.load(f)
+except (FileNotFoundError, json.JSONDecodeError):
+    config = {}
+
+config.setdefault("$schema", "https://opencode.ai/config.json")
+config["permission"] = "allow"
+
+with open(path, "w") as f:
+    json.dump(config, f, indent=2)
+    f.write("\n")
+PYEOF
 
 # Install droid via npm (was previously a brew cask)
 npm config set allow-scripts="droid,opencode-ai" --location=user
@@ -203,15 +228,15 @@ baseten_models = [
         "maxOutputTokens": 8192,
         "noImageSupport": False
     },
-    {
-        "model": "zai-org/GLM-5.2-1M",
-        "displayName": "GLM 5.2 1M [Baseten]",
-        "baseUrl": "https://inference.baseten.co/v1",
-        "apiKey": api_key,
-        "provider": "generic-chat-completion-api",
-        "maxOutputTokens": 8192,
-        "noImageSupport": True
-    }
+    # {
+    #     "model": "zai-org/GLM-5.2-1M",
+    #     "displayName": "GLM 5.2 1M [Baseten]",
+    #     "baseUrl": "https://inference.baseten.co/v1",
+    #     "apiKey": api_key,
+    #     "provider": "generic-chat-completion-api",
+    #     "maxOutputTokens": 8192,
+    #     "noImageSupport": True
+    # }
 ]
 
 existing = {m.get("model"): i for i, m in enumerate(settings["customModels"])}
