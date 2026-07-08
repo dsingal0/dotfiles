@@ -21,6 +21,10 @@ fi
 $ADO update -y || true
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
+# Source shared config helpers (opencode permission + Baseten BYOK models),
+# deduplicated with brew-setup.sh so both bootstrap scripts stay in sync.
+. "$SCRIPT_DIR/lib/shared.sh"
+
 $ADO install -y btop libclang-dev tree libevent-dev libncurses-dev build-essential bison || true
 
 # Install/update tmux from apt.
@@ -39,7 +43,7 @@ tmux source-file "$HOME/.tmux.conf" 2>/dev/null || true
 
 # Link custom user scripts into ~/.local/bin (on PATH via the gh step below)
 mkdir -p "$HOME/.local/bin"
-ln -sf "$SCRIPT_DIR/bin/droid-to-opencode" "$HOME/.local/bin/droid-to-opencode"
+ln -sf "$SCRIPT_DIR/bin/droid-export" "$HOME/.local/bin/droid-export"
 
 # Download and install/update nvm:
 curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.4/install.sh | bash
@@ -66,26 +70,7 @@ echo "Installing opencode..."
 npm i -g opencode-ai || curl -fsSL https://opencode.ai/install | bash
 opencode --version
 
-# Ensure ~/.config/opencode/opencode.json has permission: allow (merged with
-# any existing keys, e.g. an mcp servers block set elsewhere).
-mkdir -p ~/.config/opencode
-python3 - << 'PYEOF'
-import json, os
-
-path = os.path.expanduser("~/.config/opencode/opencode.json")
-try:
-    with open(path, "r") as f:
-        config = json.load(f)
-except (FileNotFoundError, json.JSONDecodeError):
-    config = {}
-
-config.setdefault("$schema", "https://opencode.ai/config.json")
-config["permission"] = "allow"
-
-with open(path, "w") as f:
-    json.dump(config, f, indent=2)
-    f.write("\n")
-PYEOF
+configure_opencode_permission
 
 # Install droid via npm
 npm config set allow-scripts="droid,opencode-ai" --location=user
@@ -160,157 +145,12 @@ echo "Configuring git identity..."
 git config --global user.name "Dhruv Singal"
 git config --global user.email "dhruvsingalabc@gmail.com"
 
-# Configure Factory custom models (Baseten BYOK)
-# API key is read from .env in the repo root (kept local, never committed).
-# Copy .env.example to .env and fill in your key:
+# Configure Factory: Baseten BYOK custom models (~/.factory/settings.json) and
+# FACTORY_API_KEY exported to shell rc files for the droid CLI.
+# Keys are read from .env in the repo root (kept local, never committed).
+# Copy .env.example to .env and fill in your keys:
 #   cp .env.example .env
-# Key can also be exported directly: BASETEN_API_KEY=your_key ./setup.sh
-if [[ -f "$SCRIPT_DIR/.env" ]]; then
-  set -a; source "$SCRIPT_DIR/.env"; set +a
-fi
-
-if [[ -z "${BASETEN_API_KEY:-}" ]]; then
-  echo "WARNING: BASETEN_API_KEY is not set. Skipping Baseten model config."
-  echo "         To enable: cp .env.example .env and fill in your key, or export BASETEN_API_KEY."
-else
-  mkdir -p ~/.factory
-  BASETEN_API_KEY="$BASETEN_API_KEY" python3 - << 'PYEOF'
-import json, os
-
-settings_path = os.path.expanduser("~/.factory/settings.json")
-try:
-    with open(settings_path, "r") as f:
-        settings = json.load(f)
-except (FileNotFoundError, json.JSONDecodeError):
-    settings = {}
-
-settings.setdefault("customModels", [])
-
-api_key = os.environ["BASETEN_API_KEY"]
-
-baseten_models = [
-    {
-        "model": "openai/gpt-oss-120b",
-        "displayName": "GPT-OSS 120B [Baseten]",
-        "baseUrl": "https://inference.baseten.co/v1",
-        "apiKey": api_key,
-        "provider": "generic-chat-completion-api",
-        "maxOutputTokens": 8192,
-        "noImageSupport": True
-    },
-    {
-        "model": "zai-org/GLM-4.7",
-        "displayName": "GLM 4.7 [Baseten]",
-        "baseUrl": "https://inference.baseten.co/v1",
-        "apiKey": api_key,
-        "provider": "generic-chat-completion-api",
-        "maxOutputTokens": 8192,
-        "noImageSupport": True
-    },
-    {
-        "model": "moonshotai/Kimi-K2.5",
-        "displayName": "Kimi K2.5 [Baseten]",
-        "baseUrl": "https://inference.baseten.co/v1",
-        "apiKey": api_key,
-        "provider": "generic-chat-completion-api",
-        "maxOutputTokens": 8192,
-        "noImageSupport": False
-    },
-    {
-        "model": "zai-org/GLM-5",
-        "displayName": "GLM 5 [Baseten]",
-        "baseUrl": "https://inference.baseten.co/v1",
-        "apiKey": api_key,
-        "provider": "generic-chat-completion-api",
-        "maxOutputTokens": 8192,
-        "noImageSupport": True
-    },
-    {
-        "model": "nvidia/Nemotron-120B-A12B",
-        "displayName": "Nemotron Super [Baseten]",
-        "baseUrl": "https://inference.baseten.co/v1",
-        "apiKey": api_key,
-        "provider": "generic-chat-completion-api",
-        "maxOutputTokens": 8192,
-        "noImageSupport": True
-    },
-    {
-        "model": "zai-org/GLM-5.1",
-        "displayName": "GLM 5.1 [Baseten]",
-        "baseUrl": "https://inference.baseten.co/v1",
-        "apiKey": api_key,
-        "provider": "generic-chat-completion-api",
-        "maxOutputTokens": 8192,
-        "noImageSupport": True
-    },
-    {
-        "model": "moonshotai/Kimi-K2.6",
-        "displayName": "Kimi K2.6 [Baseten]",
-        "baseUrl": "https://inference.baseten.co/v1",
-        "apiKey": api_key,
-        "provider": "generic-chat-completion-api",
-        "maxOutputTokens": 8192,
-        "noImageSupport": False
-    },
-    {
-        "model": "deepseek-ai/DeepSeek-V4-Pro",
-        "displayName": "DeepSeek V4 Pro [Baseten]",
-        "baseUrl": "https://inference.baseten.co/v1",
-        "apiKey": api_key,
-        "provider": "generic-chat-completion-api",
-        "maxOutputTokens": 8192,
-        "noImageSupport": True
-    },
-    {
-        "model": "nvidia/NVIDIA-Nemotron-3-Ultra-550B-A55B",
-        "displayName": "Nemotron Ultra [Baseten]",
-        "baseUrl": "https://inference.baseten.co/v1",
-        "apiKey": api_key,
-        "provider": "generic-chat-completion-api",
-        "maxOutputTokens": 8192,
-        "noImageSupport": True
-    },
-    {
-        "model": "zai-org/GLM-5.2",
-        "displayName": "GLM 5.2 [Baseten]",
-        "baseUrl": "https://inference.baseten.co/v1",
-        "apiKey": api_key,
-        "provider": "generic-chat-completion-api",
-        "maxOutputTokens": 8192,
-        "noImageSupport": True
-    },
-    {
-        "model": "moonshotai/Kimi-K2.7-Code",
-        "displayName": "Kimi K2.7 Code [Baseten]",
-        "baseUrl": "https://inference.baseten.co/v1",
-        "apiKey": api_key,
-        "provider": "generic-chat-completion-api",
-        "maxOutputTokens": 8192,
-        "noImageSupport": False
-    },
-    # {
-    #     "model": "zai-org/GLM-5.2-1M",
-    #     "displayName": "GLM 5.2 1M [Baseten]",
-    #     "baseUrl": "https://inference.baseten.co/v1",
-    #     "apiKey": api_key,
-    #     "provider": "generic-chat-completion-api",
-    #     "maxOutputTokens": 8192,
-    #     "noImageSupport": True
-    # }
-]
-
-existing = {m.get("model"): i for i, m in enumerate(settings["customModels"])}
-for m in baseten_models:
-    name = m["model"]
-    if name in existing:
-        settings["customModels"][existing[name]]["apiKey"] = api_key
-    else:
-        settings["customModels"].append(m)
-
-with open(settings_path, "w") as f:
-    json.dump(settings, f, indent=2)
-    f.write("\n")
-PYEOF
-fi
+# Keys can also be exported directly: BASETEN_API_KEY=... FACTORY_API_KEY=... ./setup.sh
+configure_factory "$SCRIPT_DIR"
 
 echo "Setup complete!"
