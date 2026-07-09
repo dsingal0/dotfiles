@@ -123,6 +123,10 @@ curl -fsSL https://app.factory.ai/cli | sh
 echo "Installing paseo..."
 npm install -g @getpaseo/cli@beta && paseo
 
+# Install Devin CLI
+echo "Installing Devin CLI..."
+curl -fsSL https://cli.devin.ai/install.sh | bash
+
 # Install/update rtk (Rust Token Killer) - CLI proxy that cuts LLM token usage.
 # Single Rust binary in ~/.local/bin; ensure that dir is on PATH for this script
 # (the .bashrc append below only applies to future shells).
