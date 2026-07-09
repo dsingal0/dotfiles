@@ -256,3 +256,174 @@ configure_factory() {
     echo "      droid will fall back to its OAuth auth file (~/.factory/auth.v2.file)."
   fi
 }
+
+# Symlink every skill under <repo>/skills/<name>/SKILL.md into each harness's
+# global skills directory so droid, opencode, cursor-cli, and grok all see the
+# same personal skill set. Idempotent: re-runs refresh the symlinks.
+#
+# Targets (primary path per harness; avoids multi-scan duplicates):
+#   Factory / droid  -> ~/.factory/skills/
+#   OpenCode         -> ~/.config/opencode/skills/
+#   Cursor CLI       -> ~/.cursor/skills/
+#   xAI / Grok Build -> ~/.grok/skills/
+#
+# Existing non-symlink directories are left alone (with a warning) so vendor
+# or hand-installed skills are not clobbered.
+# Pass the repo root as $1.
+install_shared_skills() {
+  local repo_dir="$1"
+  local skills_src="$repo_dir/skills"
+
+  if [[ ! -d "$skills_src" ]]; then
+    echo "NOTE: no skills/ directory at $skills_src; skipping skill install."
+    return 0
+  fi
+
+  local targets=(
+    "$HOME/.factory/skills"
+    "$HOME/.config/opencode/skills"
+    "$HOME/.cursor/skills"
+    "$HOME/.grok/skills"
+  )
+
+  local target skill_dir name dest count=0
+  for target in "${targets[@]}"; do
+    mkdir -p "$target"
+  done
+
+  echo "Installing shared skills from $skills_src ..."
+  for skill_dir in "$skills_src"/*/; do
+    [[ -d "$skill_dir" ]] || continue
+    skill_dir="${skill_dir%/}"
+    [[ -f "$skill_dir/SKILL.md" ]] || continue
+    name="$(basename "$skill_dir")"
+
+    for target in "${targets[@]}"; do
+      dest="$target/$name"
+      if [[ -e "$dest" && ! -L "$dest" ]]; then
+        echo "  WARNING: $dest exists and is not a symlink; leaving it alone."
+        continue
+      fi
+      ln -sfn "$skill_dir" "$dest"
+    done
+    echo "  linked $name"
+    count=$((count + 1))
+  done
+
+  echo "Shared skills installed: $count skill(s) -> factory, opencode, cursor, grok."
+}
+
+# Install third-party skill packs globally for every supported agent harness via
+# the skills.sh CLI (npx skills). Uses --all so every skill in the pack is
+# installed and every detected agent is targeted (-g = user-global).
+# Idempotent: re-runs refresh to latest from each source.
+#
+# Packs:
+#   https://github.com/mattpocock/skills
+#   https://github.com/basetenlabs/baseten-skills
+#
+# Requires node/npx (installed earlier by both bootstrap scripts).
+install_skill_packages() {
+  if ! command -v npx >/dev/null 2>&1; then
+    echo "WARNING: npx not found; skipping third-party skill packages."
+    return 0
+  fi
+
+  local packs=(
+    "mattpocock/skills"
+    "basetenlabs/baseten-skills"
+  )
+  local pack
+  for pack in "${packs[@]}"; do
+    echo "Installing skill pack: $pack (global, all agents)..."
+    # --full-depth: mattpocock nests skills under engineering/productivity/etc.
+    # Failures for a few unsupported agents (Eve, PromptScript) are expected;
+    # the CLI still exits 0 and installs to factory/cursor/opencode/agents/etc.
+    npx --yes skills@latest add "$pack" -g --all --full-depth \
+      || echo "WARNING: skill pack install reported errors for $pack (continuing)."
+  done
+}
+
+# Install the Baseten CLI (https://github.com/basetenlabs/baseten-cli).
+# Prefers Homebrew (macOS and Linuxbrew); falls back to the latest GitHub
+# release tarball into ~/.local/bin.
+install_baseten_cli() {
+  echo "Installing baseten CLI..."
+  if command -v brew >/dev/null 2>&1; then
+    brew tap basetenlabs/baseten
+    # Third-party taps may require an explicit trust step on newer Homebrew.
+    brew trust basetenlabs/baseten 2>/dev/null || true
+    brew install baseten
+    baseten --version 2>/dev/null || baseten version 2>/dev/null || true
+    return 0
+  fi
+
+  mkdir -p "$HOME/.local/bin"
+  local os arch asset url tmp
+  case "$(uname -s)" in
+    Darwin) os="darwin" ;;
+    Linux)  os="linux" ;;
+    *)
+      echo "WARNING: unsupported OS for baseten CLI binary install: $(uname -s)"
+      return 0
+      ;;
+  esac
+  case "$(uname -m)" in
+    arm64|aarch64) arch="arm64" ;;
+    x86_64|amd64)  arch="amd64" ;;
+    *)
+      echo "WARNING: unsupported arch for baseten CLI binary install: $(uname -m)"
+      return 0
+      ;;
+  esac
+
+  # Resolve latest release tag via GitHub API; fall back to a known good version.
+  local tag
+  tag="$(curl -fsSL https://api.github.com/repos/basetenlabs/baseten-cli/releases/latest \
+    | python3 -c 'import sys,json; print(json.load(sys.stdin)["tag_name"])' 2>/dev/null \
+    || true)"
+  tag="${tag:-v0.2.0}"
+  local ver="${tag#v}"
+  asset="baseten_${ver}_${os}_${arch}.tar.gz"
+  url="https://github.com/basetenlabs/baseten-cli/releases/download/${tag}/${asset}"
+
+  tmp="$(mktemp -d)"
+  echo "  downloading $url ..."
+  if curl -fsSL "$url" | tar xz -C "$tmp" && [[ -f "$tmp/baseten" ]]; then
+    install -m 755 "$tmp/baseten" "$HOME/.local/bin/baseten"
+    export PATH="$HOME/.local/bin:$PATH"
+    baseten --version 2>/dev/null || baseten version 2>/dev/null || true
+  else
+    echo "WARNING: failed to download/install baseten CLI from $url"
+  fi
+  rm -rf "$tmp"
+}
+
+# Ensure uv is available, create ~/venv if missing, and install/upgrade truss
+# into that venv (used by deploy-loop and Baseten model authoring).
+ensure_venv_with_truss() {
+  echo "Ensuring ~/venv with truss..."
+  # Common install locations for uv (curl installer + Homebrew).
+  export PATH="$HOME/.local/bin:$HOME/.cargo/bin:/opt/homebrew/bin:/usr/local/bin:$PATH"
+
+  if ! command -v uv >/dev/null 2>&1; then
+    echo "  uv not found; installing via astral.sh..."
+    curl -LsSf https://astral.sh/uv/install.sh | sh
+    export PATH="$HOME/.local/bin:$PATH"
+  fi
+
+  if ! command -v uv >/dev/null 2>&1; then
+    echo "WARNING: uv still not on PATH; cannot create ~/venv."
+    return 0
+  fi
+
+  # Create only if missing; never clobber an existing venv.
+  if [[ ! -x "$HOME/venv/bin/python" ]]; then
+    uv venv "$HOME/venv"
+  fi
+  uv pip install --python "$HOME/venv/bin/python" --upgrade truss
+  if [[ -x "$HOME/venv/bin/truss" ]]; then
+    echo "  truss: $("$HOME/venv/bin/truss" version 2>/dev/null || "$HOME/venv/bin/python" -c 'import truss; print(getattr(truss, "__version__", "installed"))')"
+  fi
+  echo "  venv ready at $HOME/venv (activate with: source ~/venv/bin/activate)"
+}

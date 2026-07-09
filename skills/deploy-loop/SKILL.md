@@ -1,3 +1,8 @@
+---
+name: deploy-loop
+description: Iterative Baseten deploy -> check logs -> deactivate if errored -> fix -> redeploy cycle. Use when pushing or debugging a Truss/BIS model deployment.
+---
+
 # Baseten Deploy Loop
 
 Iterative deploy -> check logs -> deactivate if errored -> fix -> redeploy cycle for Baseten models.

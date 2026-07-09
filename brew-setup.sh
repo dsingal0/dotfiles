@@ -12,11 +12,16 @@ brew update
 
 # Taps
 brew tap manaflow-ai/cmux
+brew tap basetenlabs/baseten
+# Third-party taps may require an explicit trust step on newer Homebrew.
+brew trust basetenlabs/baseten 2>/dev/null || true
 
 # Packages to install and keep up to date
 # `node` provides npm, used below to install opencode.
-FORMULAS=(croc gh node mole rtk tmux)
-CASKS=(brave-browser@beta cmux cursor-cli)
+# `baseten` = basetenlabs/baseten-cli; `uv` for ~/venv + truss.
+FORMULAS=(baseten croc gh node mole rtk tmux uv)
+# droid = Factory CLI; cursor-cli = Cursor agent; grok-build = xAI CLI
+CASKS=(brave-browser@beta cmux cursor-cli droid grok-build)
 
 # Install (no-op if already installed)
 for pkg in "${FORMULAS[@]}"; do
@@ -36,6 +41,11 @@ brew upgrade --greedy
 # Symlink tmux config (enables mouse scroll passthrough for Droid in tmux)
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ln -sf "$SCRIPT_DIR/tmux.conf" "$HOME/.tmux.conf"
+
+# Link custom user scripts into ~/.local/bin
+mkdir -p "$HOME/.local/bin"
+ln -sf "$SCRIPT_DIR/bin/droid-export" "$HOME/.local/bin/droid-export"
+export PATH="$HOME/.local/bin:$PATH"
 
 # Source shared config helpers (opencode permission + Baseten BYOK models),
 # deduplicated with setup.sh so both bootstrap scripts stay in sync.
@@ -81,9 +91,8 @@ opencode --version
 
 configure_opencode_permission
 
-# Install droid via npm (was previously a brew cask)
-npm config set allow-scripts="droid,opencode-ai" --location=user
-npm install -g droid
+# opencode postinstall scripts (droid is installed via brew cask above)
+npm config set allow-scripts="opencode-ai" --location=user
 
 # Configure Factory: Baseten BYOK custom models (~/.factory/settings.json) and
 # FACTORY_API_KEY exported to shell rc files for the droid CLI.
@@ -92,6 +101,18 @@ npm install -g droid
 #   cp .env.example .env
 # Keys can also be exported directly: BASETEN_API_KEY=... FACTORY_API_KEY=... ./brew-setup.sh
 configure_factory "$SCRIPT_DIR"
+
+# Install personal skills into every harness (droid / opencode / cursor / grok)
+install_shared_skills "$SCRIPT_DIR"
+
+# Third-party skill packs (mattpocock + basetenlabs) for all agents
+install_skill_packages
+
+# baseten CLI is installed via the FORMULAS brew loop above; ensure version prints
+baseten --version 2>/dev/null || baseten version 2>/dev/null || true
+
+# ~/venv with truss (Baseten model authoring / deploy-loop)
+ensure_venv_with_truss
 
 # Install paseo CLI via npm (pre-release track via the `beta` dist-tag, latest npm from brew's node formula)
 npm install -g @getpaseo/cli@beta

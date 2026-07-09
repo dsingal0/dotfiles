@@ -289,7 +289,7 @@ update_baseten_shared_core_product() {
 # --------------------------
 kpfdb() {
   # Forward local port to django or mcm postgres instances
-  # $1: db name: django,mcm
+  # $1: db name: django, mcm (replica, read-only), mcm-master (writer)
   # $2: local port (optional) default: django=6432, mcm=5432
   # $3: namespace (optional) default: baseten
   DB_NAME=$1
@@ -298,12 +298,25 @@ kpfdb() {
     LOCAL_PORT=${2:-6432}
     DB_POD=$(kubectl get pod -n $NAMESPACE -l app=baseten-django-pgbouncer -o jsonpath="{.items[0].metadata.name}")
     kubectl port-forward -n $NAMESPACE $DB_POD $LOCAL_PORT:6432
-  elif [ "$DB_NAME" = "mcm" ]; then
+  elif [ "$DB_NAME" = "mcm" ] || [ "$DB_NAME" = "mcm-master" ]; then
     LOCAL_PORT=${2:-5432}
-    DB_POD=$(kubectl get pod -n $NAMESPACE -l postgres-operator.crunchydata.com/cluster=mcm-postgres -l postgres-operator.crunchydata.com/role=master -o jsonpath="{.items[0].metadata.name}")
+    if [ "$DB_NAME" = "mcm-master" ]; then
+      MCM_ROLE=master
+      echo "WARNING: connecting to the mcm-postgres MASTER (writer) in namespace $NAMESPACE - this connection is writable. Use 'kpfdb mcm' for the read-only replica." >&2
+    else
+      MCM_ROLE=replica
+    fi
+    DB_POD=$(kubectl get pod -n $NAMESPACE -l postgres-operator.crunchydata.com/cluster=mcm-postgres -l postgres-operator.crunchydata.com/role=$MCM_ROLE -o jsonpath="{.items[0].metadata.name}")
+    if [ -z "$DB_POD" ]; then
+      echo "No mcm-postgres pod with role=$MCM_ROLE found in namespace $NAMESPACE." >&2
+      if [ "$MCM_ROLE" = "replica" ]; then
+        echo "This cluster may not have a replica. Use 'kpfdb mcm-master' to reach the writer (be careful - it is writable)." >&2
+      fi
+      return 1
+    fi
     kubectl port-forward -n $NAMESPACE $DB_POD $LOCAL_PORT:5432
   else
-    echo "Unknown database $DB_NAME"
+    echo "Unknown database $DB_NAME (expected: django, mcm, mcm-master)" >&2
     return 1
   fi
 }

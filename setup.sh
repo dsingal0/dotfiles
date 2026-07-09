@@ -90,6 +90,10 @@ append_once "$HOME/.bashrc" 'export PATH="$HOME/.local/bin:$PATH"'
 # Install/update uv
 echo "Installing uv..."
 curl -LsSf https://astral.sh/uv/install.sh | sh
+# Ensure uv is on PATH for the rest of this script (installer targets ~/.local/bin)
+export PATH="$HOME/.local/bin:$PATH"
+# shellcheck disable=SC1091
+\. "$HOME/.local/bin/env" 2>/dev/null || true
 
 # Install/update Rust and Cargo
 echo "Installing Rust..."
@@ -116,8 +120,8 @@ echo "Installing Factory CLI..."
 curl -fsSL https://app.factory.ai/cli | sh
 
 # Install/update Cursor CLI
-# echo "Installing Cursor CLI..."
-# curl https://cursor.com/install -fsS | bash
+echo "Installing Cursor CLI..."
+curl https://cursor.com/install -fsS | bash
 
 # Install/update paseo (pre-release track via the `beta` dist-tag)
 echo "Installing paseo..."
@@ -126,6 +130,10 @@ npm install -g @getpaseo/cli@beta && paseo
 # Install Devin CLI
 echo "Installing Devin CLI..."
 curl -fsSL https://cli.devin.ai/install.sh | bash
+
+# Install/update xAI CLI (Grok Build)
+echo "Installing xAI CLI..."
+curl -fsSL https://x.ai/cli/install.sh | bash
 
 # Install/update rtk (Rust Token Killer) - CLI proxy that cuts LLM token usage.
 # Single Rust binary in ~/.local/bin; ensure that dir is on PATH for this script
@@ -156,5 +164,17 @@ git config --global user.email "dhruvsingalabc@gmail.com"
 #   cp .env.example .env
 # Keys can also be exported directly: BASETEN_API_KEY=... FACTORY_API_KEY=... ./setup.sh
 configure_factory "$SCRIPT_DIR"
+
+# Install personal skills into every harness (droid / opencode / cursor / grok)
+install_shared_skills "$SCRIPT_DIR"
+
+# Third-party skill packs (mattpocock + basetenlabs) for all agents
+install_skill_packages
+
+# Baseten CLI (Homebrew if available, else GitHub release -> ~/.local/bin)
+install_baseten_cli
+
+# ~/venv with truss (Baseten model authoring / deploy-loop)
+ensure_venv_with_truss
 
 echo "Setup complete!"
