@@ -313,14 +313,16 @@ install_shared_skills() {
   echo "Shared skills installed: $count skill(s) -> factory, opencode, cursor, grok."
 }
 
-# Install third-party skill packs globally for every supported agent harness via
-# the skills.sh CLI (npx skills). Uses --all so every skill in the pack is
-# installed and every detected agent is targeted (-g = user-global).
+# Install third-party skill packs globally via the skills.sh CLI (npx skills).
 # Idempotent: re-runs refresh to latest from each source.
 #
 # Packs:
 #   https://github.com/mattpocock/skills
 #   https://github.com/basetenlabs/baseten-skills
+#
+# Agents are listed explicitly rather than --agent '*': Eve and PromptScript
+# do not support global skill installation and would otherwise emit failures.
+# `universal` covers ~/.agents/skills (also picked up by Grok Build, etc.).
 #
 # Requires node/npx (installed earlier by both bootstrap scripts).
 install_skill_packages() {
@@ -333,13 +335,28 @@ install_skill_packages() {
     "mattpocock/skills"
     "basetenlabs/baseten-skills"
   )
+  # Harnesses we install in bootstrap + common neighbors. Skip eve / promptscript.
+  local agents=(
+    universal
+    droid
+    opencode
+    cursor
+    codex
+    claude-code
+    devin
+  )
+  local agent_args=()
+  local a
+  for a in "${agents[@]}"; do
+    agent_args+=(-a "$a")
+  done
+
   local pack
   for pack in "${packs[@]}"; do
-    echo "Installing skill pack: $pack (global, all agents)..."
+    echo "Installing skill pack: $pack (global)..."
     # --full-depth: mattpocock nests skills under engineering/productivity/etc.
-    # Failures for a few unsupported agents (Eve, PromptScript) are expected;
-    # the CLI still exits 0 and installs to factory/cursor/opencode/agents/etc.
-    npx --yes skills@latest add "$pack" -g --all --full-depth \
+    npx --yes skills@latest add "$pack" -g -y --skill '*' --full-depth \
+      "${agent_args[@]}" \
       || echo "WARNING: skill pack install reported errors for $pack (continuing)."
   done
 }
