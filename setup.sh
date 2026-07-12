@@ -128,8 +128,8 @@ echo "Installing paseo..."
 npm install -g @getpaseo/cli@beta && paseo
 
 # Install Devin CLI
-echo "Installing Devin CLI..."
-curl -fsSL https://cli.devin.ai/install.sh | bash
+# echo "Installing Devin CLI..."
+# curl -fsSL https://cli.devin.ai/install.sh | bash
 
 # Install/update xAI CLI (Grok Build)
 echo "Installing xAI CLI..."

@@ -118,8 +118,8 @@ ensure_venv_with_truss
 npm install -g @getpaseo/cli@beta
 
 # Install Devin CLI
-echo "Installing Devin CLI..."
-curl -fsSL https://cli.devin.ai/install.sh | bash
+# echo "Installing Devin CLI..."
+# curl -fsSL https://cli.devin.ai/install.sh | bash
 
 # Remove stale downloads and old versions
 brew cleanup --prune=all
