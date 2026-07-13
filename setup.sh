@@ -136,8 +136,8 @@ npm install -g @getpaseo/cli@beta && paseo
 # curl -fsSL https://cli.devin.ai/install.sh | bash
 
 # Install/update xAI CLI (Grok Build)
-echo "Installing xAI CLI..."
-curl -fsSL https://x.ai/cli/install.sh | bash
+# echo "Installing xAI CLI..."
+# curl -fsSL https://x.ai/cli/install.sh | bash
 
 # Install/update rtk (Rust Token Killer) - CLI proxy that cuts LLM token usage.
 # Single Rust binary in ~/.local/bin; ensure that dir is on PATH for this script
