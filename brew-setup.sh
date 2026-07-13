@@ -23,20 +23,21 @@ FORMULAS=(baseten croc gh node mole rtk tmux uv)
 # droid = Factory CLI; cursor-cli = Cursor agent; grok-build = xAI CLI
 CASKS=(brave-browser@beta cmux cursor-cli droid grok-build)
 
-# Install (no-op if already installed)
+# Install (no-op if already installed). Continue on individual failures
+# (e.g. cask binary conflict: "already a Binary at '/opt/homebrew/bin/droid'").
 for pkg in "${FORMULAS[@]}"; do
-  brew install "$pkg"
+  brew install "$pkg" || echo "Warning: failed to install formula '$pkg' (continuing)"
 done
 
 for pkg in "${CASKS[@]}"; do
-  brew install --cask "$pkg"
+  brew install --cask "$pkg" || echo "Warning: failed to install cask '$pkg' (continuing)"
 done
 
 # Upgrade all installed packages (formulae and casks)
 echo "Checking for outdated packages..."
 brew outdated --greedy || true
-brew upgrade
-brew upgrade --greedy
+brew upgrade || echo "Warning: brew upgrade failed (continuing)"
+brew upgrade --greedy || echo "Warning: brew upgrade --greedy failed (continuing)"
 
 # Symlink tmux config (enables mouse scroll passthrough for Droid in tmux)
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -122,6 +123,6 @@ npm install -g @getpaseo/cli@beta
 # curl -fsSL https://cli.devin.ai/install.sh | bash
 
 # Remove stale downloads and old versions
-brew cleanup --prune=all
+brew cleanup --prune=all || echo "Warning: brew cleanup failed (continuing)"
 
 echo "Done!"
