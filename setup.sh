@@ -123,6 +123,10 @@ curl -fsSL https://app.factory.ai/cli | sh
 echo "Installing Cursor CLI..."
 curl https://cursor.com/install -fsS | bash
 
+# Install/update Codex CLI
+echo "Installing Codex CLI..."
+curl -fsSL https://chatgpt.com/codex/install.sh | sh
+
 # Install/update paseo (pre-release track via the `beta` dist-tag)
 echo "Installing paseo..."
 npm install -g @getpaseo/cli@beta && paseo
