@@ -116,7 +116,7 @@ baseten --version 2>/dev/null || baseten version 2>/dev/null || true
 ensure_venv_with_truss
 
 # Install paseo CLI via npm (pre-release track via the `beta` dist-tag, latest npm from brew's node formula)
-npm install -g @getpaseo/cli@beta
+npm install -g --allow-scripts=node-pty @getpaseo/cli@beta
 
 # Install Devin CLI
 # echo "Installing Devin CLI..."
