@@ -36,8 +36,8 @@ done
 # Upgrade all installed packages (formulae and casks)
 echo "Checking for outdated packages..."
 brew outdated --greedy || true
-brew upgrade || echo "Warning: brew upgrade failed (continuing)"
-brew upgrade --greedy || echo "Warning: brew upgrade --greedy failed (continuing)"
+yes | brew upgrade || echo "Warning: brew upgrade failed (continuing)"
+yes | brew upgrade --greedy || echo "Warning: brew upgrade --greedy failed (continuing)"
 
 # Symlink tmux config (enables mouse scroll passthrough for Droid in tmux)
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
