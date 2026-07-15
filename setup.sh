@@ -175,7 +175,8 @@ install_shared_skills "$SCRIPT_DIR"
 # Third-party skill packs (mattpocock + basetenlabs) for all agents
 install_skill_packages
 
-# Baseten CLI (Homebrew if available, else GitHub release -> ~/.local/bin)
+# Baseten CLI (https://github.com/basetenlabs/baseten-cli)
+# Homebrew if available, else GitHub release -> ~/.local/bin
 install_baseten_cli
 
 # ~/venv with truss (Baseten model authoring / deploy-loop)

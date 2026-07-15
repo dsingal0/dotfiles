@@ -18,10 +18,10 @@ brew trust basetenlabs/baseten 2>/dev/null || true
 
 # Packages to install and keep up to date
 # `node` provides npm, used below to install opencode.
-# `baseten` = basetenlabs/baseten-cli; `uv` for ~/venv + truss.
+# `baseten` = basetenlabs/baseten-cli (https://github.com/basetenlabs/baseten-cli); `uv` for ~/venv + truss.
 FORMULAS=(baseten croc gh node mole rtk tmux uv)
 # droid = Factory CLI; cursor-cli = Cursor agent; codex = OpenAI Codex CLI
-CASKS=(brave-browser@beta cmux codex cursor-cli droid)
+CASKS=(brave-browser@beta cmux codex cursor-cli droid openchamber)
 # grok-build = xAI CLI
 # CASKS+=(grok-build)
 
