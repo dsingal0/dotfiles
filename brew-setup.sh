@@ -89,13 +89,12 @@ cp "$ALIASES_FILE" "$SCRIPT_DIR/baseten_aliases"
 
 # Install/update opencode (stable)
 echo "Installing opencode..."
-npm i -g opencode-ai
+curl -fsSL https://opencode.ai/install | bash
 opencode --version
 
 configure_opencode_permission
 
-# opencode postinstall scripts (droid is installed via brew cask above)
-npm config set allow-scripts="opencode-ai" --location=user
+# droid is installed via brew cask above
 
 # Configure Factory: Baseten BYOK custom models (~/.factory/settings.json) and
 # FACTORY_API_KEY exported to shell rc files for the droid CLI.
