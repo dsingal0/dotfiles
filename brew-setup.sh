@@ -22,8 +22,7 @@ brew trust basetenlabs/baseten 2>/dev/null || true
 FORMULAS=(baseten croc gh node mole rtk tmux uv)
 # droid = Factory CLI; cursor-cli = Cursor agent; codex = OpenAI Codex CLI
 CASKS=(brave-browser@beta cmux codex cursor-cli droid openchamber)
-# grok-build = xAI CLI
-# CASKS+=(grok-build)
+CASKS+=(grok-build)
 
 # Install (no-op if already installed). Continue on individual failures
 # (e.g. cask binary conflict: "already a Binary at '/opt/homebrew/bin/droid'").
@@ -119,9 +118,9 @@ ensure_venv_with_truss
 # Install paseo CLI via npm (pre-release track via the `beta` dist-tag, latest npm from brew's node formula)
 npm install -g --allow-scripts=node-pty @getpaseo/cli@beta
 
-# Install Devin CLI
-# echo "Installing Devin CLI..."
-# curl -fsSL https://cli.devin.ai/install.sh | bash
+# Install Devin CLI (headless — strip the interactive `devin setup` step)
+echo "Installing Devin CLI..."
+curl -fsSL https://cli.devin.ai/install.sh | sed '$d' | bash
 
 # Remove stale downloads and old versions
 brew cleanup --prune=all || echo "Warning: brew cleanup failed (continuing)"

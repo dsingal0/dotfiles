@@ -131,13 +131,13 @@ curl -fsSL https://chatgpt.com/codex/install.sh | sh
 echo "Installing paseo..."
 npm install -g @getpaseo/cli@beta && paseo
 
-# Install Devin CLI
-# echo "Installing Devin CLI..."
-# curl -fsSL https://cli.devin.ai/install.sh | bash
+# Install Devin CLI (headless — strip the interactive `devin setup` step)
+echo "Installing Devin CLI..."
+curl -fsSL https://cli.devin.ai/install.sh | sed '$d' | bash
 
 # Install/update xAI CLI (Grok Build)
-# echo "Installing xAI CLI..."
-# curl -fsSL https://x.ai/cli/install.sh | bash
+echo "Installing xAI CLI..."
+curl -fsSL https://x.ai/cli/install.sh | bash
 
 # Install/update rtk (Rust Token Killer) - CLI proxy that cuts LLM token usage.
 # Single Rust binary in ~/.local/bin; ensure that dir is on PATH for this script
