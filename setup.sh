@@ -76,10 +76,6 @@ configure_opencode_permission
 npm config set allow-scripts="droid,opencode-ai" --location=user
 npm install -g droid
 
-# Install/update croc
-echo "Installing croc..."
-curl https://getcroc.schollz.com | bash
-
 # Install/update gh
 echo "Installing gh..."
 curl -sS https://webi.sh/gh | sh
@@ -153,6 +149,9 @@ rtk --version
 # CLAUDE.md / settings.json artifacts (I don't use Claude Code).
 # Note: rtk has no native Droid/Factory integration; Droid is not wired here.
 RTK_TELEMETRY_DISABLED=1 rtk init -g --opencode
+# Cursor desktop isn't installed on Linux dev pods, so ~/.cursor may not exist;
+# rtk writes a temp file there during init and errors out without the dir.
+mkdir -p "$HOME/.cursor"
 RTK_TELEMETRY_DISABLED=1 rtk init -g --agent cursor --hook-only --no-patch
 rtk init --show
 
@@ -179,7 +178,7 @@ install_skill_packages
 # Homebrew if available, else GitHub release -> ~/.local/bin
 install_baseten_cli
 
-# ~/venv with truss (Baseten model authoring / deploy-loop)
-ensure_venv_with_truss
+# ~/venv with truss (Baseten model authoring / deploy-loop) and magic-wormhole
+ensure_venv
 
 echo "Setup complete!"

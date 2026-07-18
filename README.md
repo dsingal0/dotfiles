@@ -81,13 +81,15 @@ is skipped with a warning.
 - **FACTORY_API_KEY** - persisted to shell rc files so the `droid` CLI reads it
   from the environment (alternative to OAuth; requires `FACTORY_API_KEY`)
 - tmux config symlinked to `~/.tmux.conf`
+- **~/venv** (via `uv`) with **truss** (Baseten model authoring / deploy-loop)
+  and **magic-wormhole** (file transfer, replaces croc); `wormhole` symlinked
+  to `~/.local/bin`
 
 ### Linux (`setup.sh`)
 
 - **btop**, tree, build-essential, libclang-dev (best-effort via apt)
 - **tmux** (distro package)
 - **nvm** + Node.js 26
-- **croc** (file transfer between machines)
 - **gh** (GitHub CLI, via webi)
 - **uv** (Python package manager)
 - **Rust** / Cargo (+ `LIBCLANG_PATH` for bindgen)
@@ -98,7 +100,7 @@ is skipped with a warning.
 
 ### macOS (`brew-setup.sh`)
 
-- Homebrew formulae: `croc gh node mole rtk tmux`
+- Homebrew formulae: `baseten gh node mole rtk tmux uv`
 - Homebrew casks: `brave-browser@beta cmux cursor-cli`
 - `~/.baseten_aliases` created if missing; the managed `ksh` shell helper is
   (re)written and a copy kept in the repo for version control

@@ -416,10 +416,14 @@ install_baseten_cli() {
   rm -rf "$tmp"
 }
 
-# Ensure uv is available, create ~/venv if missing, and install/upgrade truss
-# into that venv (used by deploy-loop and Baseten model authoring).
-ensure_venv_with_truss() {
-  echo "Ensuring ~/venv with truss..."
+# Ensure uv is available, create ~/venv if missing, and install/upgrade into
+# that venv:
+#   - truss    (Baseten model authoring / deploy-loop)
+#   - magic-wormhole (file transfer, replaces croc)
+# The wormhole CLI is symlinked into ~/.local/bin so it's on PATH without
+# activating the venv.
+ensure_venv() {
+  echo "Ensuring ~/venv with truss and magic-wormhole..."
   # Common install locations for uv (curl installer + Homebrew).
   export PATH="$HOME/.local/bin:$HOME/.cargo/bin:/opt/homebrew/bin:/usr/local/bin:$PATH"
 
@@ -438,9 +442,14 @@ ensure_venv_with_truss() {
   if [[ ! -x "$HOME/venv/bin/python" ]]; then
     uv venv "$HOME/venv"
   fi
-  uv pip install --python "$HOME/venv/bin/python" --upgrade truss
+  uv pip install --python "$HOME/venv/bin/python" --upgrade truss magic-wormhole
   if [[ -x "$HOME/venv/bin/truss" ]]; then
     echo "  truss: $("$HOME/venv/bin/truss" version 2>/dev/null || "$HOME/venv/bin/python" -c 'import truss; print(getattr(truss, "__version__", "installed"))')"
+  fi
+  if [[ -x "$HOME/venv/bin/wormhole" ]]; then
+    mkdir -p "$HOME/.local/bin"
+    ln -sfn "$HOME/venv/bin/wormhole" "$HOME/.local/bin/wormhole"
+    echo "  wormhole: $("$HOME/venv/bin/wormhole" --version 2>/dev/null || echo installed)"
   fi
   echo "  venv ready at $HOME/venv (activate with: source ~/venv/bin/activate)"
 }
