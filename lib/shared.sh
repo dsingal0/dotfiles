@@ -341,8 +341,6 @@ install_skill_packages() {
     droid
     opencode
     cursor
-    codex
-    claude-code
   )
   local agent_args=()
   local a
@@ -358,6 +356,52 @@ install_skill_packages() {
       "${agent_args[@]}" \
       || echo "WARNING: skill pack install reported errors for $pack (continuing)."
   done
+
+  # Remove stale agent skill dirs left by a previous `--agent '*'` run.
+  cleanup_stale_skill_dirs
+}
+
+# Remove dotdirs in $HOME whose entire contents are symlinks pointing into
+# ~/.agents/skills/. These dirs are created by a previous
+# `npx skills add --agent '*'` run (now replaced by an explicit agents list)
+# and only contain skill symlinks — no real config or data. Real agent dirs
+# (.cursor, .grok, .factory, .opencode) have config files and are
+# never touched. Idempotent.
+cleanup_stale_skill_dirs() {
+  python3 - << 'PYEOF'
+import os, glob, shutil
+
+home = os.path.expanduser("~")
+removed = 0
+for entry in sorted(glob.glob(os.path.join(home, ".*"))):
+    name = os.path.basename(entry)
+    if name in (".", "..") or not os.path.isdir(entry):
+        continue
+    has_real = False
+    has_skill_links = False
+    for root, dirs, files in os.walk(entry, followlinks=False):
+        for f in files:
+            full = os.path.join(root, f)
+            if os.path.islink(full):
+                tgt = os.readlink(full)
+                if ".agents/skills" in tgt:
+                    has_skill_links = True
+                else:
+                    has_real = True
+            else:
+                has_real = True
+        for d in dirs:
+            full = os.path.join(root, d)
+            if os.path.islink(full) and ".agents/skills" not in os.readlink(full):
+                has_real = True
+        if has_real:
+            break
+    if has_skill_links and not has_real:
+        shutil.rmtree(entry)
+        print(f"  removed stale skill dir: {name}")
+        removed += 1
+print(f"Stale skill dirs removed: {removed}")
+PYEOF
 }
 
 # Install the Baseten CLI (https://github.com/basetenlabs/baseten-cli).

@@ -108,7 +108,7 @@ is skipped with a warning.
 
 ## tmux config (`tmux.conf`)
 
-Tuned for running TUI agents (Droid, Claude Code, Codex, opencode) inside tmux,
+Tuned for running TUI agents (Droid, Claude Code, opencode) inside tmux,
 including over SSH to remote pods. Symlinked to `~/.tmux.conf` by both setup
 scripts. Highlights:
 
