@@ -118,10 +118,6 @@ ensure_venv
 # Install paseo CLI via npm (pre-release track via the `beta` dist-tag, latest npm from brew's node formula)
 npm install -g --allow-scripts=node-pty @getpaseo/cli@beta
 
-# Install Devin CLI (headless — strip the interactive `devin setup` step)
-echo "Installing Devin CLI..."
-curl -fsSL https://cli.devin.ai/install.sh | sed '$d' | bash
-
 # Remove stale downloads and old versions
 brew cleanup --prune=all || echo "Warning: brew cleanup failed (continuing)"
 

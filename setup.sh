@@ -127,10 +127,6 @@ curl -fsSL https://chatgpt.com/codex/install.sh | CODEX_NON_INTERACTIVE=true sh
 echo "Installing paseo..."
 npm install -g @getpaseo/cli@beta && paseo
 
-# Install Devin CLI (headless — strip the interactive `devin setup` step)
-echo "Installing Devin CLI..."
-curl -fsSL https://cli.devin.ai/install.sh | sed '$d' | bash
-
 # Install/update xAI CLI (Grok Build)
 echo "Installing xAI CLI..."
 curl -fsSL https://x.ai/cli/install.sh | bash

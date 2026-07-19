@@ -343,7 +343,6 @@ install_skill_packages() {
     cursor
     codex
     claude-code
-    devin
   )
   local agent_args=()
   local a
