@@ -47,6 +47,7 @@ ln -sf "$SCRIPT_DIR/tmux.conf" "$HOME/.tmux.conf"
 # Link custom user scripts into ~/.local/bin
 mkdir -p "$HOME/.local/bin"
 ln -sf "$SCRIPT_DIR/bin/droid-export" "$HOME/.local/bin/droid-export"
+ln -sf "$SCRIPT_DIR/bin/devpod-bundle" "$HOME/.local/bin/devpod-bundle"
 export PATH="$HOME/.local/bin:$PATH"
 
 # Source shared config helpers (opencode permission + Baseten BYOK models),

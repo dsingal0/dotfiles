@@ -1,0 +1,217 @@
+#!/usr/bin/env bash
+# devpod-bundle - pack auth + settings for SSH, opencode, factory droid,
+# cursor CLI, and grok CLI into a single tar.gz so they can be wormholed
+# to a dev pod and unpacked into the right locations.
+#
+# Two modes:
+#
+#   bundle  (default)  - run on the Mac you stay logged in on. Reads the
+#                       local auth/settings files and writes a timestamped
+#                       ~/devpod-bundle-<stamp>.tar.gz (mode 600).
+#   restore (--restore <file>.tar.gz)
+#                     - run on the dev pod. Extracts a bundle into $HOME,
+#                       skipping the embedded RESTORE.txt note (which is
+#                       printed to stdout instead of littering ~).
+#
+# Paths in the archive are stored RELATIVE TO $HOME (e.g. ./.ssh/id_ed25519,
+# ./.local/share/opencode/auth.json), so on any pod you can also just:
+#
+#     cd ~ && tar -xzf devpod-bundle-*.tar.gz
+#
+# regardless of the pod's username. The --restore mode does exactly that,
+# minus the RESTORE.txt note.
+#
+# Cursor CLI auth lives in the macOS Keychain (cursor-access-token /
+# cursor-refresh-token) and is NOT bundled here -- log into Cursor manually
+# on each pod. Only Cursor's on-disk settings are included.
+#
+# The output file is mode 600 (it contains secrets). Re-run anytime; each
+# bundle produces a new timestamped archive and leaves old ones in place.
+#
+# Usage:
+#   devpod-bundle                          # write ~/devpod-bundle-<stamp>.tar.gz
+#   devpod-bundle --list                   # show what would be packed, write nothing
+#   devpod-bundle -o /tmp/x.tgz            # write to a custom path
+#   devpod-bundle --restore <bundle>.tar.gz        # extract into $HOME (pod)
+#   devpod-bundle --restore <bundle>.tar.gz --dry-run  # list only, extract nothing
+
+set -euo pipefail
+
+HOME_DIR="${HOME:?HOME is not set}"
+
+# --------------------------------------------------------------------------- args
+OUT=""
+LIST_ONLY=0
+RESTORE_FILE=""
+DRY_RUN=0
+
+usage() {
+  sed -n '2,/^$/p' "$0" | sed 's/^# \{0,1\}//'
+}
+
+while [ $# -gt 0 ]; do
+  case "$1" in
+    -o|--output)  OUT="$2"; shift 2 ;;
+    --list)       LIST_ONLY=1; shift ;;
+    --restore)    RESTORE_FILE="$2"; shift 2 ;;
+    --dry-run)    DRY_RUN=1; shift ;;
+    -h|--help)    usage; exit 0 ;;
+    *) echo "unknown arg: $1" >&2; usage >&2; exit 2 ;;
+  esac
+done
+
+# --------------------------------------------------------------------------- restore
+if [ -n "$RESTORE_FILE" ]; then
+  if [ ! -f "$RESTORE_FILE" ]; then
+    echo "restore: not a file: $RESTORE_FILE" >&2
+    exit 1
+  fi
+  if ! tar -tzf "$RESTORE_FILE" >/dev/null 2>&1; then
+    echo "restore: not a gzip tar archive: $RESTORE_FILE" >&2
+    exit 1
+  fi
+
+  echo "Bundle contents ($RESTORE_FILE):"
+  tar -tzf "$RESTORE_FILE" | sed 's/^/  /'
+
+  if [ "$DRY_RUN" -eq 1 ]; then
+    echo "(--dry-run: nothing extracted)"
+    exit 0
+  fi
+
+  echo
+  echo "Extracting into $HOME_DIR ..."
+  # Skip the embedded RESTORE.txt note so it doesn't litter ~; print it below.
+  tar -xzf "$RESTORE_FILE" -C "$HOME_DIR" --exclude=RESTORE.txt
+  echo "done."
+
+  if tar -tzf "$RESTORE_FILE" | grep -qx 'RESTORE.txt'; then
+    echo
+    echo "----- RESTORE.txt (from bundle) -----"
+    tar -xzOf "$RESTORE_FILE" RESTORE.txt
+    echo "----- end RESTORE.txt -----"
+  fi
+  exit 0
+fi
+
+# --------------------------------------------------------------------------- bundle
+STAMP="$(date +%Y%m%d-%H%M%S)"
+DEFAULT_OUT="$HOME_DIR/devpod-bundle-$STAMP.tar.gz"
+[ -z "$OUT" ] && OUT="$DEFAULT_OUT"
+
+# Absolute source paths. All must live under $HOME. Each entry is bundled
+# recursively (if a dir) or as a single file.
+abs_paths=(
+  "$HOME_DIR/.ssh"
+  "$HOME_DIR/.local/share/opencode/auth.json"
+  "$HOME_DIR/.config/opencode/opencode.json"
+  "$HOME_DIR/.factory/cache/certs/factory-cli-certs.pem"
+  "$HOME_DIR/.factory/settings.json"
+  "$HOME_DIR/.cursor/cli-config.json"
+  "$HOME_DIR/.cursor/agent-cli-state.json"
+  "$HOME_DIR/.grok/auth.json"
+  "$HOME_DIR/.grok/config.toml"
+)
+
+# A short label for each path, used in the report (kept in lockstep with
+# abs_paths via the same index).
+labels=(
+  "ssh (dir)"
+  "opencode auth"
+  "opencode settings"
+  "factory droid auth (mTLS cert)"
+  "factory droid settings"
+  "cursor CLI settings"
+  "cursor CLI state"
+  "grok CLI auth"
+  "grok CLI settings"
+)
+
+if [ "${#abs_paths[@]}" -ne "${#labels[@]}" ]; then
+  echo "internal error: abs_paths/labels length mismatch" >&2
+  exit 1
+fi
+
+rel_paths=()
+present_labels=()
+missing=()
+for i in "${!abs_paths[@]}"; do
+  p="${abs_paths[$i]}"
+  lbl="${labels[$i]}"
+  if [ ! -e "$p" ]; then
+    missing+=("$lbl  ($p)")
+    continue
+  fi
+  case "$p" in
+    "$HOME_DIR"/*) rel="${p#"$HOME_DIR"/}" ;;
+    *) echo "skipping path not under \$HOME: $p" >&2; continue ;;
+  esac
+  rel_paths+=("$rel")
+  present_labels+=("$lbl -> ~/$rel")
+done
+
+if [ ${#rel_paths[@]} -eq 0 ]; then
+  echo "nothing to bundle (no source paths found under $HOME_DIR)" >&2
+  exit 1
+fi
+
+echo "Bundling from $HOME_DIR:"
+printf '  %s\n' "${present_labels[@]}"
+if [ ${#missing[@]} -gt 0 ]; then
+  echo "missing (skipped):"
+  printf '  %s\n' "${missing[@]}" >&2
+fi
+
+if [ "$LIST_ONLY" -eq 1 ]; then
+  exit 0
+fi
+
+# Companion note placed at the archive root so the pod knows what it has and
+# how to restore it.
+TMP_BUNDLE="$(mktemp -d)"
+trap 'rm -rf "$TMP_BUNDLE"' EXIT
+{
+  echo "devpod-bundle"
+  echo "============="
+  echo "created:   $(date)"
+  echo "source:    $(hostname)  (user: $(whoami), home: $HOME_DIR)"
+  echo
+  echo "Contents (paths relative to \$HOME):"
+  printf '  %s\n' "${present_labels[@]}"
+  if [ ${#missing[@]} -gt 0 ]; then
+    echo
+    echo "Not bundled on source host:"
+    printf '  %s\n' "${missing[@]}"
+  fi
+  echo
+  echo "Restore on the pod:"
+  echo "  ~/dotfiles/devpod-bundle --restore <bundle>.tar.gz"
+  echo "  (or: cd ~ && tar -xzf <bundle>.tar.gz)"
+  echo
+  echo "Notes:"
+  echo "  - File permissions are preserved (ssh keys stay 0600, etc.)."
+  echo "  - Cursor CLI auth is NOT included (lives in macOS Keychain on the"
+  echo "    source Mac). Run \`cursor login\` (or equivalent) on the pod."
+  echo "  - factory-cli-certs.pem is the mTLS client cert; if it has expired"
+  echo "    on the pod, re-run \`factory login\` there."
+} > "$TMP_BUNDLE/RESTORE.txt"
+
+# Build the archive. Paths are stored relative to $HOME via -C "$HOME_DIR";
+# RESTORE.txt is added from the temp dir with a second -C. Excludes drop the
+# stale known_hosts backup and any stray agent sockets.
+tar -czf "$OUT" \
+  --exclude='.ssh/known_hosts.old' \
+  --exclude='*.sock' \
+  -C "$HOME_DIR" "${rel_paths[@]}" \
+  -C "$TMP_BUNDLE" RESTORE.txt
+
+chmod 600 "$OUT"
+
+echo
+echo "wrote: $OUT  ($(du -h "$OUT" | cut -f1))"
+echo
+echo "archive contents:"
+tar -tzf "$OUT" | sed 's/^/  /'
+echo
+echo "send it:   wormhole send \"$OUT\""
+echo "restore:   ~/dotfiles/devpod-bundle --restore \"$OUT\"   (on the pod)"

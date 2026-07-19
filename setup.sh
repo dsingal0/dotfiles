@@ -44,6 +44,7 @@ tmux source-file "$HOME/.tmux.conf" 2>/dev/null || true
 # Link custom user scripts into ~/.local/bin (on PATH via the gh step below)
 mkdir -p "$HOME/.local/bin"
 ln -sf "$SCRIPT_DIR/bin/droid-export" "$HOME/.local/bin/droid-export"
+ln -sf "$SCRIPT_DIR/bin/devpod-bundle" "$HOME/.local/bin/devpod-bundle"
 
 # Download and install/update nvm:
 curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.4/install.sh | bash

@@ -62,7 +62,10 @@ is skipped with a warning.
 ├── tmux.conf          # tmux config symlinked to ~/.tmux.conf
 ├── bin/
 │   ├── droid-export   # export a Factory "droid" session to JSONL / markdown
+│   ├── devpod-bundle  # pack/restore SSH + opencode/factory/cursor/grok CLI
+│   │                   #   auth+settings for wormhole Mac <-> dev pod
 │   └── droid-to-opencode  -> droid-export   (compat symlink)
+├── devpod-bundle      -> bin/devpod-bundle  (run from repo root on any host)
 ├── skills/            # Factory skill definitions (SKILL.md per skill)
 ├── baseten_aliases    # kubectl / shell aliases for the baseten monorepo
 ├── .env.example       # template for BASETEN_API_KEY
@@ -96,7 +99,7 @@ is skipped with a warning.
 - **rtk** (Rust Token Killer - LLM token proxy), with hooks for opencode + Cursor
 - **paseo** (`@getpaseo/cli@beta`)
 - git identity (name + email) configured globally
-- `bin/droid-export` symlinked into `~/.local/bin`
+- `bin/droid-export` and `bin/devpod-bundle` symlinked into `~/.local/bin`
 
 ### macOS (`brew-setup.sh`)
 
@@ -155,6 +158,31 @@ Block types: `text`, `reasoning`, `tool_use` (with original droid tool name +
 input), `tool_result`. System-reminder noise blocks are dropped.
 
 `bin/droid-to-opencode` is a symlink to `droid-export` kept for compatibility.
+
+## devpod-bundle (`bin/devpod-bundle`)
+
+Pack the auth + settings for SSH, opencode, Factory droid, Cursor CLI, and
+grok CLI into one tar.gz, wormhole it to a dev pod, and restore it there -
+so you only stay logged in on one machine (your Mac).
+
+Paths in the archive are relative to `$HOME`, so restore works on any pod
+regardless of username. Cursor CLI auth lives in the macOS Keychain and is
+NOT bundled - run `cursor login` on each pod. The factory mTLS cert
+(`~/.factory/cache/certs/factory-cli-certs.pem`) is bundled; re-run
+`factory login` on the pod if it has expired.
+
+```bash
+# On the Mac (the machine you stay logged in on):
+devpod-bundle                          # writes ~/devpod-bundle-<stamp>.tar.gz
+devpod-bundle --list                   # dry run, write nothing
+devpod-bundle -o /tmp/x.tgz            # custom output path
+wormhole send ~/devpod-bundle-*.tar.gz
+
+# On the dev pod (after `git pull` of this repo at ~/dotfiles):
+~/dotfiles/devpod-bundle --restore ~/devpod-bundle-*.tar.gz
+~/dotfiles/devpod-bundle --restore ~/devpod-bundle-*.tar.gz --dry-run  # list only
+# or, without the script: cd ~ && tar -xzf devpod-bundle-*.tar.gz
+```
 
 ## Notes
 
