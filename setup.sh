@@ -163,6 +163,7 @@ git config --global user.email "dhruvsingalabc@gmail.com"
 #   cp .env.example .env
 # Keys can also be exported directly: BASETEN_API_KEY=... FACTORY_API_KEY=... ./setup.sh
 configure_factory "$SCRIPT_DIR"
+configure_cursor
 
 # Install personal skills into every harness (droid / opencode / cursor / grok)
 install_shared_skills "$SCRIPT_DIR"

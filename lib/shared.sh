@@ -257,6 +257,48 @@ configure_factory() {
   fi
 }
 
+# Source ~/.cursor/env (CURSOR_API_KEY for the Cursor CLI `agent`) into shell
+# rc files via a managed block so new shells pick up the API key. The key file
+# itself is NOT stored in this repo; it lives at ~/.cursor/env (mode 600) and
+# is carried to dev pods by `devpod-bundle`. Idempotent.
+configure_cursor() {
+  local rc_files=( "$HOME/.bashrc" )
+  [[ -f "$HOME/.zshrc" ]] && rc_files+=( "$HOME/.zshrc" )
+  local source_line='[ -f "$HOME/.cursor/env" ] && . "$HOME/.cursor/env"'
+  local rc
+  for rc in "${rc_files[@]}"; do
+    touch "$rc"
+    RC_FILE="$rc" SOURCE_LINE="$source_line" python3 - "$rc" << 'PYEOF'
+import os, re, sys
+path = sys.argv[1]
+line = os.environ["SOURCE_LINE"]
+open_m = "# >>> cursor env (managed by dotfiles setup) >>>"
+close_m = "# <<< cursor env <<<"
+try:
+    with open(path) as f:
+        content = f.read()
+except FileNotFoundError:
+    content = ""
+block = "%s\n%s\n%s" % (open_m, line, close_m)
+pat = re.compile(r"\n?" + re.escape(open_m) + r".*?" + re.escape(close_m) + r"\n?", re.DOTALL)
+content = pat.sub("\n", content)
+content = content.rstrip()
+if content:
+    content += "\n\n"
+content += block + "\n"
+with open(path, "w") as f:
+    f.write(content)
+PYEOF
+  done
+  if [[ -f "$HOME/.cursor/env" ]]; then
+    echo "Cursor CLI: ~/.cursor/env present; new shells will export CURSOR_API_KEY."
+  else
+    echo "NOTE: ~/.cursor/env not found yet. Create it with:"
+    echo "      printf 'export CURSOR_API_KEY=crsr_...\\n' > ~/.cursor/env && chmod 600 ~/.cursor/env"
+    echo "      or restore it via: devpod-bundle --restore <bundle>.tar.gz"
+  fi
+}
+
 # Symlink every skill under <repo>/skills/<name>/SKILL.md into each harness's
 # global skills directory so droid, opencode, cursor-cli, and grok all see the
 # same personal skill set. Idempotent: re-runs refresh the symlinks.

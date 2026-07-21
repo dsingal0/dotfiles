@@ -20,8 +20,8 @@ brew trust basetenlabs/baseten 2>/dev/null || true
 # `node` provides npm, used below to install opencode.
 # `baseten` = basetenlabs/baseten-cli (https://github.com/basetenlabs/baseten-cli); `uv` for ~/venv + truss.
 FORMULAS=(baseten gh node mole rtk tmux uv)
-# droid = Factory CLI; cursor-cli = Cursor agent
-CASKS=(brave-browser@beta cmux cursor-cli droid openchamber)
+# droid = Factory CLI; cursor-cli installed via curl below
+CASKS=(brave-browser@beta cmux droid openchamber)
 CASKS+=(grok-build)
 
 # Install (no-op if already installed). Continue on individual failures
@@ -94,6 +94,11 @@ opencode --version
 
 configure_opencode_permission
 
+# Install cursor-cli (Cursor agent) via official installer
+echo "Installing cursor-cli..."
+curl -fsS https://cursor.com/install | bash
+cursor --version 2>/dev/null || true
+
 # droid is installed via brew cask above
 
 # Configure Factory: Baseten BYOK custom models (~/.factory/settings.json) and
@@ -103,6 +108,7 @@ configure_opencode_permission
 #   cp .env.example .env
 # Keys can also be exported directly: BASETEN_API_KEY=... FACTORY_API_KEY=... ./brew-setup.sh
 configure_factory "$SCRIPT_DIR"
+configure_cursor
 
 # Install personal skills into every harness (droid / opencode / cursor / grok)
 install_shared_skills "$SCRIPT_DIR"

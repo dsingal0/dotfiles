@@ -21,9 +21,10 @@
 # regardless of the pod's username. The --restore mode does exactly that,
 # minus the RESTORE.txt note.
 #
-# Cursor CLI auth lives in the macOS Keychain (cursor-access-token /
-# cursor-refresh-token) and is NOT bundled here -- log into Cursor manually
-# on each pod. Only Cursor's on-disk settings are included.
+# Cursor CLI auth uses an API key (CURSOR_API_KEY) stored in ~/.cursor/env
+# (mode 600, outside this repo). That file IS bundled, so it travels Mac ->
+# pod via the archive; shell rc files source it via a managed block added by
+# setup.sh / brew-setup.sh. Browser/keychain tokens are not bundled.
 #
 # The output file is mode 600 (it contains secrets). Re-run anytime; each
 # bundle produces a new timestamped archive and leaves old ones in place.
@@ -109,6 +110,7 @@ abs_paths=(
   "$HOME_DIR/.factory/settings.json"
   "$HOME_DIR/.cursor/cli-config.json"
   "$HOME_DIR/.cursor/agent-cli-state.json"
+  "$HOME_DIR/.cursor/env"
   "$HOME_DIR/.grok/auth.json"
   "$HOME_DIR/.grok/config.toml"
 )
@@ -123,6 +125,7 @@ labels=(
   "factory droid settings"
   "cursor CLI settings"
   "cursor CLI state"
+  "cursor CLI auth (API key)"
   "grok CLI auth"
   "grok CLI settings"
 )
@@ -190,8 +193,9 @@ trap 'rm -rf "$TMP_BUNDLE"' EXIT
   echo
   echo "Notes:"
   echo "  - File permissions are preserved (ssh keys stay 0600, etc.)."
-  echo "  - Cursor CLI auth is NOT included (lives in macOS Keychain on the"
-  echo "    source Mac). Run \`cursor login\` (or equivalent) on the pod."
+  echo "  - Cursor CLI auth IS included via ~/.cursor/env (CURSOR_API_KEY)."
+  echo "    Shell rc must source it (managed block added by setup.sh /"
+  echo "    brew-setup.sh). Run \`agent status\` on the pod to verify."
   echo "  - factory-cli-certs.pem is the mTLS client cert; if it has expired"
   echo "    on the pod, re-run \`factory login\` there."
 } > "$TMP_BUNDLE/RESTORE.txt"

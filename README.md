@@ -83,6 +83,9 @@ is skipped with a warning.
   `~/.factory/settings.json` (requires `BASETEN_API_KEY`)
 - **FACTORY_API_KEY** - persisted to shell rc files so the `droid` CLI reads it
   from the environment (alternative to OAuth; requires `FACTORY_API_KEY`)
+- **CURSOR_API_KEY** - `~/.cursor/env` (mode 600, not in this repo) sourced by
+  shell rc files via a managed block so the Cursor CLI `agent` uses API-key
+  auth; the key file is carried to dev pods by `devpod-bundle`
 - tmux config symlinked to `~/.tmux.conf`
 - **~/venv** (via `uv`) with **truss** (Baseten model authoring / deploy-loop)
   and **magic-wormhole** (file transfer, replaces croc); `wormhole` symlinked
@@ -166,8 +169,10 @@ grok CLI into one tar.gz, wormhole it to a dev pod, and restore it there -
 so you only stay logged in on one machine (your Mac).
 
 Paths in the archive are relative to `$HOME`, so restore works on any pod
-regardless of username. Cursor CLI auth lives in the macOS Keychain and is
-NOT bundled - run `cursor login` on each pod. The factory mTLS cert
+regardless of username. Cursor CLI auth uses an API key (`CURSOR_API_KEY`)
+stored in `~/.cursor/env` (mode 600, not in this repo), which IS bundled; shell
+rc files source it via a managed block added by `setup.sh` / `brew-setup.sh`
+(`configure_cursor` in `lib/shared.sh`). The factory mTLS cert
 (`~/.factory/cache/certs/factory-cli-certs.pem`) is bundled; re-run
 `factory login` on the pod if it has expired.
 
