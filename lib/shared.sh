@@ -361,6 +361,7 @@ install_shared_skills() {
 # Packs:
 #   https://github.com/mattpocock/skills
 #   https://github.com/basetenlabs/baseten-skills
+#   https://github.com/expo/skills
 #
 # Agents are listed explicitly rather than --agent '*': Eve and PromptScript
 # do not support global skill installation and would otherwise emit failures.
@@ -376,6 +377,7 @@ install_skill_packages() {
   local packs=(
     "mattpocock/skills"
     "basetenlabs/baseten-skills"
+    "expo/skills"
   )
   # Harnesses we install in bootstrap + common neighbors. Skip eve / promptscript.
   local agents=(
