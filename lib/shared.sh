@@ -300,20 +300,23 @@ PYEOF
 }
 
 # Symlink every skill under <repo>/skills/<name>/SKILL.md into each harness's
-# global skills directory so droid, opencode, cursor-cli, and grok all see the
-# same personal skill set. Idempotent: re-runs refresh the symlinks.
+# global skills directory so droid, opencode, and cursor-cli all see the same
+# personal skill set. Grok Build is included only when $2 is "true" (default),
+# so brew-setup.sh installs grok skills while setup.sh skips them.
+# Idempotent: re-runs refresh the symlinks.
 #
 # Targets (primary path per harness; avoids multi-scan duplicates):
 #   Factory / droid  -> ~/.factory/skills/
 #   OpenCode         -> ~/.config/opencode/skills/
 #   Cursor CLI       -> ~/.cursor/skills/
-#   xAI / Grok Build -> ~/.grok/skills/
+#   xAI / Grok Build -> ~/.grok/skills/   (optional, see $2)
 #
 # Existing non-symlink directories are left alone (with a warning) so vendor
 # or hand-installed skills are not clobbered.
-# Pass the repo root as $1.
+# Pass the repo root as $1. Optionally pass "false" as $2 to skip grok.
 install_shared_skills() {
   local repo_dir="$1"
+  local include_grok="${2:-true}"
   local skills_src="$repo_dir/skills"
 
   if [[ ! -d "$skills_src" ]]; then
@@ -325,13 +328,18 @@ install_shared_skills() {
     "$HOME/.factory/skills"
     "$HOME/.config/opencode/skills"
     "$HOME/.cursor/skills"
-    "$HOME/.grok/skills"
   )
+  if [[ "$include_grok" == "true" ]]; then
+    targets+=("$HOME/.grok/skills")
+  fi
 
   local target skill_dir name dest count=0
   for target in "${targets[@]}"; do
     mkdir -p "$target"
   done
+
+  local harness_names="factory, opencode, cursor"
+  [[ "$include_grok" == "true" ]] && harness_names+=", grok"
 
   echo "Installing shared skills from $skills_src ..."
   for skill_dir in "$skills_src"/*/; do
@@ -352,7 +360,7 @@ install_shared_skills() {
     count=$((count + 1))
   done
 
-  echo "Shared skills installed: $count skill(s) -> factory, opencode, cursor, grok."
+  echo "Shared skills installed: $count skill(s) -> $harness_names."
 }
 
 # Install third-party skill packs globally via the skills.sh CLI (npx skills).

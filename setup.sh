@@ -127,10 +127,6 @@ curl https://cursor.com/install -fsS | bash
 echo "Installing paseo..."
 npm install -g @getpaseo/cli@beta && paseo
 
-# Install/update xAI CLI (Grok Build)
-echo "Installing xAI CLI..."
-curl -fsSL https://x.ai/cli/install.sh | bash
-
 # Install/update rtk (Rust Token Killer) - CLI proxy that cuts LLM token usage.
 # Single Rust binary in ~/.local/bin; ensure that dir is on PATH for this script
 # (the .bashrc append below only applies to future shells).
@@ -165,8 +161,8 @@ git config --global user.email "dhruvsingalabc@gmail.com"
 configure_factory "$SCRIPT_DIR"
 configure_cursor
 
-# Install personal skills into every harness (droid / opencode / cursor / grok)
-install_shared_skills "$SCRIPT_DIR"
+# Install personal skills into every harness (droid / opencode / cursor)
+install_shared_skills "$SCRIPT_DIR" false
 
 # Third-party skill packs (mattpocock + basetenlabs) for all agents
 install_skill_packages
