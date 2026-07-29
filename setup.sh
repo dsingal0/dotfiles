@@ -171,6 +171,16 @@ install_skill_packages
 # Homebrew if available, else GitHub release -> ~/.local/bin
 install_baseten_cli
 
+# Install/update Herdr bash completions (herdr is installed out-of-band; this
+# regenerates the script so it stays in sync with the installed binary).
+if command -v herdr >/dev/null 2>&1; then
+  echo "Installing Herdr bash completions..."
+  mkdir -p "$HOME/.local/share/bash-completion/completions"
+  herdr completion bash > "$HOME/.local/share/bash-completion/completions/herdr"
+  append_once "$HOME/.bashrc" '# Herdr bash completions (managed by dotfiles setup)'
+  append_once "$HOME/.bashrc" '[[ -r "$HOME/.local/share/bash-completion/completions/herdr" ]] && source "$HOME/.local/share/bash-completion/completions/herdr"'
+fi
+
 # ~/venv with truss (Baseten model authoring / deploy-loop) and magic-wormhole
 ensure_venv
 
