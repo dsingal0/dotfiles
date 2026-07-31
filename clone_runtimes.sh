@@ -44,7 +44,7 @@ unshallow_one() {
 pids=()
 
 for entry in "${REPOS[@]}"; do
-  url="${entry%%:*}"
+  url="${entry%:*}"
   dir="${entry##*:}"
   clone_one "$url" "$dir" &
   pids+=($!)
