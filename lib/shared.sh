@@ -37,7 +37,12 @@ PYEOF
 #
 # Reads BASETEN_API_KEY from the environment (callers source .env first).
 # Skips with a warning if the key is unset. Idempotent: existing entries for the
-# same model id are updated in place (api key refresh); new ones are appended.
+# same model id are updated in place (api key refresh); new ones are appended;
+# Baseten entries whose model is no longer served are pruned.
+#
+# The model list is synced with Baseten Model APIs
+# (https://docs.baseten.co/inference/model-apis/overview); the live source of
+# truth is `curl https://inference.baseten.co/v1/models -H "Authorization: Bearer $BASETEN_API_KEY"`.
 configure_factory_models() {
   if [[ -z "${BASETEN_API_KEY:-}" ]]; then
     echo "WARNING: BASETEN_API_KEY is not set. Skipping Baseten model config."
@@ -60,116 +65,48 @@ settings.setdefault("customModels", [])
 
 api_key = os.environ["BASETEN_API_KEY"]
 
+BASE_URL = "https://inference.baseten.co/v1"
+
+def baseten_model(model, display_name, no_image):
+    return {
+        "model": model,
+        "displayName": display_name,
+        "baseUrl": BASE_URL,
+        "apiKey": api_key,
+        "provider": "generic-chat-completion-api",
+        "maxOutputTokens": 8192,
+        "noImageSupport": no_image
+    }
+
 baseten_models = [
-    {
-        "model": "openai/gpt-oss-120b",
-        "displayName": "GPT-OSS 120B [Baseten]",
-        "baseUrl": "https://inference.baseten.co/v1",
-        "apiKey": api_key,
-        "provider": "generic-chat-completion-api",
-        "maxOutputTokens": 8192,
-        "noImageSupport": True
-    },
-    {
-        "model": "zai-org/GLM-4.7",
-        "displayName": "GLM 4.7 [Baseten]",
-        "baseUrl": "https://inference.baseten.co/v1",
-        "apiKey": api_key,
-        "provider": "generic-chat-completion-api",
-        "maxOutputTokens": 8192,
-        "noImageSupport": True
-    },
-    {
-        "model": "moonshotai/Kimi-K2.5",
-        "displayName": "Kimi K2.5 [Baseten]",
-        "baseUrl": "https://inference.baseten.co/v1",
-        "apiKey": api_key,
-        "provider": "generic-chat-completion-api",
-        "maxOutputTokens": 8192,
-        "noImageSupport": False
-    },
-    {
-        "model": "zai-org/GLM-5",
-        "displayName": "GLM 5 [Baseten]",
-        "baseUrl": "https://inference.baseten.co/v1",
-        "apiKey": api_key,
-        "provider": "generic-chat-completion-api",
-        "maxOutputTokens": 8192,
-        "noImageSupport": True
-    },
-    {
-        "model": "nvidia/Nemotron-120B-A12B",
-        "displayName": "Nemotron Super [Baseten]",
-        "baseUrl": "https://inference.baseten.co/v1",
-        "apiKey": api_key,
-        "provider": "generic-chat-completion-api",
-        "maxOutputTokens": 8192,
-        "noImageSupport": True
-    },
-    {
-        "model": "zai-org/GLM-5.1",
-        "displayName": "GLM 5.1 [Baseten]",
-        "baseUrl": "https://inference.baseten.co/v1",
-        "apiKey": api_key,
-        "provider": "generic-chat-completion-api",
-        "maxOutputTokens": 8192,
-        "noImageSupport": True
-    },
-    {
-        "model": "moonshotai/Kimi-K2.6",
-        "displayName": "Kimi K2.6 [Baseten]",
-        "baseUrl": "https://inference.baseten.co/v1",
-        "apiKey": api_key,
-        "provider": "generic-chat-completion-api",
-        "maxOutputTokens": 8192,
-        "noImageSupport": False
-    },
-    {
-        "model": "deepseek-ai/DeepSeek-V4-Pro",
-        "displayName": "DeepSeek V4 Pro [Baseten]",
-        "baseUrl": "https://inference.baseten.co/v1",
-        "apiKey": api_key,
-        "provider": "generic-chat-completion-api",
-        "maxOutputTokens": 8192,
-        "noImageSupport": True
-    },
-    {
-        "model": "nvidia/NVIDIA-Nemotron-3-Ultra-550B-A55B",
-        "displayName": "Nemotron Ultra [Baseten]",
-        "baseUrl": "https://inference.baseten.co/v1",
-        "apiKey": api_key,
-        "provider": "generic-chat-completion-api",
-        "maxOutputTokens": 8192,
-        "noImageSupport": True
-    },
-    {
-        "model": "zai-org/GLM-5.2",
-        "displayName": "GLM 5.2 [Baseten]",
-        "baseUrl": "https://inference.baseten.co/v1",
-        "apiKey": api_key,
-        "provider": "generic-chat-completion-api",
-        "maxOutputTokens": 8192,
-        "noImageSupport": True
-    },
-    {
-        "model": "moonshotai/Kimi-K2.7-Code",
-        "displayName": "Kimi K2.7 Code [Baseten]",
-        "baseUrl": "https://inference.baseten.co/v1",
-        "apiKey": api_key,
-        "provider": "generic-chat-completion-api",
-        "maxOutputTokens": 8192,
-        "noImageSupport": False
-    },
-    # {
-    #     "model": "zai-org/GLM-5.2-1M",
-    #     "displayName": "GLM 5.2 1M [Baseten]",
-    #     "baseUrl": "https://inference.baseten.co/v1",
-    #     "apiKey": api_key,
-    #     "provider": "generic-chat-completion-api",
-    #     "maxOutputTokens": 8192,
-    #     "noImageSupport": True
-    # }
+    baseten_model("openai/gpt-oss-120b", "GPT-OSS 120B [Baseten]", True),
+    baseten_model("zai-org/GLM-4.7", "GLM 4.7 [Baseten]", True),
+    baseten_model("moonshotai/Kimi-K2.6", "Kimi K2.6 [Baseten]", False),
+    baseten_model("deepseek-ai/DeepSeek-V4-Pro", "DeepSeek V4 Pro [Baseten]", True),
+    baseten_model("nvidia/NVIDIA-Nemotron-3-Ultra-550B-A55B", "Nemotron Ultra [Baseten]", True),
+    baseten_model("zai-org/GLM-5.2", "GLM 5.2 [Baseten]", True),
+    baseten_model("moonshotai/Kimi-K2.7-Code", "Kimi K2.7 Code [Baseten]", False),
+    baseten_model("deepseek-ai/DeepSeek-V4-Flash-0731", "DeepSeek V4 Flash [Baseten]", True),
+    baseten_model("zai-org/GLM-5.2-Fast", "GLM 5.2 Fast [Baseten]", True),
+    baseten_model("moonshotai/Kimi-K3", "Kimi K3 [Baseten]", False),
+    baseten_model("thinkingmachines/inkling", "Inkling [Baseten]", False),
+    baseten_model("thinkingmachines/inkling-small", "Inkling Small [Baseten]", False),
+    # Served but intentionally skipped (too crippled/small for agentic coding):
+    #   zai-org/GLM-5.2-1M      - max output capped at 5k
+    #   inception/mercury-2     - 8k context
+    #   sid/sid-1               - 32k context, 5k max output
 ]
+
+# Prune Baseten-managed entries whose model is no longer served (e.g. GLM-5,
+# GLM-5.1, Kimi-K2.5, Nemotron Super were dropped from the Model APIs).
+wanted = {m["model"] for m in baseten_models}
+kept = []
+for m in settings["customModels"]:
+    if m.get("baseUrl") == BASE_URL and m.get("model") not in wanted:
+        print("  pruned no-longer-served Baseten model: %s" % m.get("model"))
+        continue
+    kept.append(m)
+settings["customModels"] = kept
 
 existing = {m.get("model"): i for i, m in enumerate(settings["customModels"])}
 for m in baseten_models:
@@ -177,6 +114,7 @@ for m in baseten_models:
     if name in existing:
         settings["customModels"][existing[name]]["apiKey"] = api_key
     else:
+        print("  added Baseten model: %s" % name)
         settings["customModels"].append(m)
 
 with open(settings_path, "w") as f:
@@ -370,13 +308,19 @@ install_shared_skills() {
 #   https://github.com/mattpocock/skills
 #   https://github.com/basetenlabs/baseten-skills
 #   https://github.com/expo/skills
+#   https://github.com/emilkowalski/skills  (opt-in, see $1)
 #
 # Agents are listed explicitly rather than --agent '*': Eve and PromptScript
 # do not support global skill installation and would otherwise emit failures.
 # `universal` covers ~/.agents/skills (also picked up by Grok Build, etc.).
 #
+# Pass "true" as $1 to also install the emilkowalski/skills pack
+# (brew-setup.sh on macOS); setup.sh (Linux dev pods) skips it.
+#
 # Requires node/npx (installed earlier by both bootstrap scripts).
 install_skill_packages() {
+  local include_emilkowalski="${1:-false}"
+
   if ! command -v npx >/dev/null 2>&1; then
     echo "WARNING: npx not found; skipping third-party skill packages."
     return 0
@@ -387,6 +331,9 @@ install_skill_packages() {
     "basetenlabs/baseten-skills"
     "expo/skills"
   )
+  if [[ "$include_emilkowalski" == "true" ]]; then
+    packs+=("emilkowalski/skills")
+  fi
   # Harnesses we install in bootstrap + common neighbors. Skip eve / promptscript.
   local agents=(
     universal

@@ -19,7 +19,7 @@ brew trust basetenlabs/baseten 2>/dev/null || true
 # Packages to install and keep up to date
 # `node` provides npm, used below to install opencode.
 # `baseten` = basetenlabs/baseten-cli (https://github.com/basetenlabs/baseten-cli); `uv` for ~/venv + truss.
-FORMULAS=(baseten gh node mole rtk tmux uv)
+FORMULAS=(baseten btop gh node mole rtk tmux uv)
 # droid = Factory CLI; cursor-cli installed via curl below
 CASKS=(brave-browser@beta cmux droid openchamber)
 CASKS+=(grok-build)
@@ -113,8 +113,8 @@ configure_cursor
 # Install personal skills into every harness (droid / opencode / cursor / grok)
 install_shared_skills "$SCRIPT_DIR"
 
-# Third-party skill packs (mattpocock + basetenlabs) for all agents
-install_skill_packages
+# Third-party skill packs (mattpocock + basetenlabs + emilkowalski) for all agents
+install_skill_packages true
 
 # baseten CLI is installed via the FORMULAS brew loop above; ensure version prints
 baseten --version 2>/dev/null || baseten version 2>/dev/null || true
