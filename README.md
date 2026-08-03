@@ -107,7 +107,7 @@ is skipped with a warning.
 ### macOS (`brew-setup.sh`)
 
 - Homebrew formulae: `baseten gh node mole rtk tmux uv`
-- Homebrew casks: `brave-browser@beta cmux cursor-cli`
+- Homebrew casks: `brave-browser@beta droid iterm2`
 - `~/.baseten_aliases` created if missing; the managed `ksh` shell helper is
   (re)written and a copy kept in the repo for version control
 - **opencode**, **droid**, **paseo** (npm)
@@ -120,7 +120,7 @@ scripts. Highlights:
 
 - **mouse on** - wheel events pass through to mouse-tracking TUIs
 - **extended-keys** with CSI-u (tmux 3.3+ guarded, so 3.2a doesn't error)
-- **256-color + RGB** for `xterm-ghostty`
+- **256-color + RGB** for `xterm-256color` (iTerm2)
 - **escape-time 0** - responsive modal editors
 - **focus-events on** - editors/watchers get focus/blur
 - **history-limit 100000** - long agent transcripts reachable in copy mode

@@ -11,7 +11,6 @@ fi
 brew update
 
 # Taps
-brew tap manaflow-ai/cmux
 brew tap basetenlabs/baseten
 # Third-party taps may require an explicit trust step on newer Homebrew.
 brew trust basetenlabs/baseten 2>/dev/null || true
@@ -20,8 +19,8 @@ brew trust basetenlabs/baseten 2>/dev/null || true
 # `node` provides npm, used below to install opencode.
 # `baseten` = basetenlabs/baseten-cli (https://github.com/basetenlabs/baseten-cli); `uv` for ~/venv + truss.
 FORMULAS=(baseten btop gh node mole rtk tmux uv)
-# droid = Factory CLI; cursor-cli installed via curl below
-CASKS=(brave-browser@beta cmux droid openchamber)
+# droid = Factory CLI; iterm2 = terminal emulator; cursor-cli installed via curl below
+CASKS=(brave-browser@beta droid iterm2)
 CASKS+=(grok-build)
 
 # Install (no-op if already installed). Continue on individual failures
