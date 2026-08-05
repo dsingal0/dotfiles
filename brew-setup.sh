@@ -44,6 +44,10 @@ for pkg in "${CASKS[@]}"; do
   brew install --cask "$pkg" || echo "Warning: failed to install cask '$pkg' (continuing)"
 done
 
+# Install/update iTerm2 shell integration + utilities (iterm2 cask above).
+echo "Installing iTerm2 shell integration..."
+curl -L https://iterm2.com/shell_integration/install_shell_integration_and_utilities.sh | bash || true
+
 # Upgrade all installed packages (formulae and casks)
 echo "Checking for outdated packages..."
 brew outdated --greedy || true
