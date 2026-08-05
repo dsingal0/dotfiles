@@ -29,6 +29,12 @@ for pkg in "${FORMULAS[@]}"; do
   brew install "$pkg" || echo "Warning: failed to install formula '$pkg' (continuing)"
 done
 
+# Install/update opencode (stable) FIRST among the coding harnesses - ahead of
+# the droid/grok-build casks below and cursor-cli further down.
+echo "Installing opencode..."
+curl -fsSL https://opencode.ai/install | bash
+opencode --version
+
 for pkg in "${CASKS[@]}"; do
   brew install --cask "$pkg" || echo "Warning: failed to install cask '$pkg' (continuing)"
 done
@@ -86,11 +92,7 @@ PYEOF
 # Keep a copy in the dotfiles repo
 cp "$ALIASES_FILE" "$SCRIPT_DIR/baseten_aliases"
 
-# Install/update opencode (stable)
-echo "Installing opencode..."
-curl -fsSL https://opencode.ai/install | bash
-opencode --version
-
+# opencode itself is installed above, before the other coding harnesses.
 configure_opencode_permission
 
 # Install cursor-cli (Cursor agent) via official installer

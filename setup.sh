@@ -76,7 +76,8 @@ opencode --version
 
 configure_opencode_permission
 
-# Install droid via npm
+# Install droid (Factory CLI) via npm - the single install channel for droid
+# on Linux (no separate curl installer).
 npm config set allow-scripts="droid,opencode-ai" --location=user
 npm install -g droid
 
@@ -114,10 +115,6 @@ for d in /usr/lib/llvm-*/lib; do
     break
   fi
 done
-
-# Install/update Factory CLI
-echo "Installing Factory CLI..."
-curl -fsSL https://app.factory.ai/cli | sh
 
 # Install/update Cursor CLI
 echo "Installing Cursor CLI..."

@@ -54,7 +54,7 @@ is skipped with a warning.
 
 ```
 .
-├── setup.sh           # Linux bootstrap (apt, nvm, rust, factory cli, rtk, ...)
+├── setup.sh           # Linux bootstrap (apt, nvm, rust, droid, rtk, ...)
 ├── brew-setup.sh      # macOS bootstrap (Homebrew formulae + casks)
 ├── lib/
 │   └── shared.sh      # sourced by both bootstrap scripts: opencode permission
@@ -76,9 +76,10 @@ is skipped with a warning.
 
 ### Both platforms (via `lib/shared.sh`)
 
-- **opencode** (`opencode-ai` via npm) with `permission: allow` merged into
+- **opencode** - installed FIRST among the coding harnesses (npm on Linux,
+  official installer on macOS), with `permission: allow` merged into
   `~/.config/opencode/opencode.json`
-- **droid** (Factory CLI, via npm)
+- **droid** (Factory CLI; npm on Linux, Homebrew cask on macOS)
 - **Factory custom models** - Baseten BYOK entries written to
   `~/.factory/settings.json` (requires `BASETEN_API_KEY`)
 - **FACTORY_API_KEY** - persisted to shell rc files so the `droid` CLI reads it
@@ -107,10 +108,10 @@ is skipped with a warning.
 ### macOS (`brew-setup.sh`)
 
 - Homebrew formulae: `baseten gh node mole rtk tmux uv`
-- Homebrew casks: `brave-browser@beta droid iterm2`
+- Homebrew casks: `brave-browser@beta droid grok-build iterm2`
 - `~/.baseten_aliases` created if missing; the managed `ksh` shell helper is
   (re)written and a copy kept in the repo for version control
-- **opencode**, **droid**, **paseo** (npm)
+- **opencode** and **cursor-cli** (official installers), **paseo** (npm)
 
 ## tmux config (`tmux.conf`)
 
@@ -191,7 +192,8 @@ wormhole send ~/devpod-bundle-*.tar.gz
 
 ## Notes
 
-- Cursor CLI and Claude CLI installs in `setup.sh` are currently commented out;
-  only opencode and droid harnesses are active.
+- The only coding harnesses installed are **opencode** (installed first),
+  **droid** (Factory CLI), **cursor-cli**, and **grok-build** (macOS only).
+  droid is installed exactly once per platform (npm on Linux, cask on macOS).
 - rtk has no native Droid/Factory integration; it is wired for opencode (plugin)
   and Cursor (preToolUse hook) only.
