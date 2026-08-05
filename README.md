@@ -76,10 +76,10 @@ is skipped with a warning.
 
 ### Both platforms (via `lib/shared.sh`)
 
-- **opencode** - installed FIRST among the coding harnesses (npm on Linux,
-  official installer on macOS), with `permission: allow` merged into
+- **opencode** - installed FIRST among the coding harnesses (official curl
+  installer; npm fallback on Linux), with `permission: allow` merged into
   `~/.config/opencode/opencode.json`
-- **droid** (Factory CLI; npm on Linux, Homebrew cask on macOS)
+- **droid** (Factory CLI; official curl installer, npm fallback on Linux)
 - **Factory custom models** - Baseten BYOK entries written to
   `~/.factory/settings.json` (requires `BASETEN_API_KEY`)
 - **FACTORY_API_KEY** - persisted to shell rc files so the `droid` CLI reads it
@@ -108,10 +108,11 @@ is skipped with a warning.
 ### macOS (`brew-setup.sh`)
 
 - Homebrew formulae: `baseten gh node mole rtk tmux uv`
-- Homebrew casks: `brave-browser@beta droid grok-build iterm2`
+- Homebrew casks: `brave-browser@beta grok-build iterm2`
 - `~/.baseten_aliases` created if missing; the managed `ksh` shell helper is
   (re)written and a copy kept in the repo for version control
-- **opencode** and **cursor-cli** (official installers), **paseo** (npm)
+- **opencode**, **droid**, and **cursor-cli** (official curl installers),
+  **paseo** (npm)
 
 ## tmux config (`tmux.conf`)
 
@@ -194,6 +195,7 @@ wormhole send ~/devpod-bundle-*.tar.gz
 
 - The only coding harnesses installed are **opencode** (installed first),
   **droid** (Factory CLI), **cursor-cli**, and **grok-build** (macOS only).
-  droid is installed exactly once per platform (npm on Linux, cask on macOS).
+  Official curl installers are preferred over package managers; grok-build has
+  no curl installer, so it stays a Homebrew cask.
 - rtk has no native Droid/Factory integration; it is wired for opencode (plugin)
   and Cursor (preToolUse hook) only.
