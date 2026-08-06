@@ -67,30 +67,60 @@ api_key = os.environ["BASETEN_API_KEY"]
 
 BASE_URL = "https://inference.baseten.co/v1"
 
-def baseten_model(model, display_name, no_image):
-    return {
+# Per-model reasoning_effort values, biased toward "high" (never xhigh/max),
+# validated against each model's supported set. Supported sets are from
+# https://docs.baseten.co/inference/model-apis/reasoning.
+REASONING_EFFORT_SUPPORTED = {
+    "deepseek-ai/DeepSeek-V4-Pro": {"none", "minimal", "low", "medium", "high", "xhigh", "max"},
+    "moonshotai/Kimi-K3": {"none", "low", "high", "max"},
+    "zai-org/GLM-5.2": {"none", "high", "max"},
+    "zai-org/GLM-5.2-Fast": {"none", "high", "max"},
+}
+REASONING_EFFORT_VALUE = {
+    "deepseek-ai/DeepSeek-V4-Pro": "high",
+    "moonshotai/Kimi-K3": "high",
+    "zai-org/GLM-5.2": "high",
+    "zai-org/GLM-5.2-Fast": "high",
+}
+# Opt-in thinking models that need chat_template_args.enable_thinking to reason.
+ENABLE_THINKING = {
+    "nvidia/NVIDIA-Nemotron-3-Ultra-550B-A55B", "zai-org/GLM-5.2", "zai-org/GLM-5.2-Fast",
+}
+
+def baseten_model(model, display_name, no_image, max_output):
+    extra_args = {}
+    if model in REASONING_EFFORT_VALUE:
+        value = REASONING_EFFORT_VALUE[model]
+        supported = REASONING_EFFORT_SUPPORTED[model]
+        if value not in supported:
+            raise ValueError(
+                "reasoning_effort %r not supported for %s (supported: %s)"
+                % (value, model, sorted(supported)))
+        extra_args["reasoning_effort"] = value
+    if model in ENABLE_THINKING:
+        extra_args["chat_template_args"] = {"enable_thinking": True}
+    entry = {
         "model": model,
         "displayName": display_name,
         "baseUrl": BASE_URL,
         "apiKey": api_key,
         "provider": "generic-chat-completion-api",
-        "maxOutputTokens": 8192,
-        "noImageSupport": no_image
+        "maxOutputTokens": max_output,
+        "noImageSupport": no_image,
     }
+    if extra_args:
+        entry["extraArgs"] = extra_args
+    return entry
 
+# Per-model max output mirrors /v1/models max_completion_tokens. extraArgs is
+# derived from REASONING_EFFORT_VALUE / ENABLE_THINKING above.
 baseten_models = [
-    baseten_model("openai/gpt-oss-120b", "GPT-OSS 120B [Baseten]", True),
-    baseten_model("zai-org/GLM-4.7", "GLM 4.7 [Baseten]", True),
-    baseten_model("moonshotai/Kimi-K2.6", "Kimi K2.6 [Baseten]", False),
-    baseten_model("deepseek-ai/DeepSeek-V4-Pro", "DeepSeek V4 Pro [Baseten]", True),
-    baseten_model("nvidia/NVIDIA-Nemotron-3-Ultra-550B-A55B", "Nemotron Ultra [Baseten]", True),
-    baseten_model("zai-org/GLM-5.2", "GLM 5.2 [Baseten]", True),
-    baseten_model("moonshotai/Kimi-K2.7-Code", "Kimi K2.7 Code [Baseten]", False),
-    baseten_model("deepseek-ai/DeepSeek-V4-Flash-0731", "DeepSeek V4 Flash [Baseten]", True),
-    baseten_model("zai-org/GLM-5.2-Fast", "GLM 5.2 Fast [Baseten]", True),
-    baseten_model("moonshotai/Kimi-K3", "Kimi K3 [Baseten]", False),
-    baseten_model("thinkingmachines/inkling", "Inkling [Baseten]", False),
-    baseten_model("thinkingmachines/inkling-small", "Inkling Small [Baseten]", False),
+    baseten_model("deepseek-ai/DeepSeek-V4-Pro", "DeepSeek V4 Pro [Baseten]", True, 262144),
+    baseten_model("deepseek-ai/DeepSeek-V4-Flash-0731", "DeepSeek V4 Flash [Baseten]", True, 1048576),
+    baseten_model("moonshotai/Kimi-K3", "Kimi K3 [Baseten]", False, 262144),
+    baseten_model("nvidia/NVIDIA-Nemotron-3-Ultra-550B-A55B", "Nemotron Ultra [Baseten]", True, 202800),
+    baseten_model("zai-org/GLM-5.2", "GLM 5.2 [Baseten]", True, 262144),
+    baseten_model("zai-org/GLM-5.2-Fast", "GLM 5.2 Fast [Baseten]", True, 262144),
     # Served but intentionally skipped (too crippled/small for agentic coding):
     #   zai-org/GLM-5.2-1M      - max output capped at 5k
     #   inception/mercury-2     - 8k context
@@ -112,7 +142,13 @@ existing = {m.get("model"): i for i, m in enumerate(settings["customModels"])}
 for m in baseten_models:
     name = m["model"]
     if name in existing:
-        settings["customModels"][existing[name]]["apiKey"] = api_key
+        # Refresh the whole Baseten-managed entry (api key, output cap, args),
+        # preserving droid-managed id/index.
+        old = settings["customModels"][existing[name]]
+        for k in ("id", "index"):
+            if k in old:
+                m[k] = old[k]
+        settings["customModels"][existing[name]] = m
     else:
         print("  added Baseten model: %s" % name)
         settings["customModels"].append(m)
@@ -461,11 +497,8 @@ install_baseten_cli() {
 # Ensure uv is available, create ~/venv if missing, and install/upgrade into
 # that venv:
 #   - truss    (Baseten model authoring / deploy-loop)
-#   - magic-wormhole (file transfer, replaces croc)
-# The wormhole CLI is symlinked into ~/.local/bin so it's on PATH without
-# activating the venv.
 ensure_venv() {
-  echo "Ensuring ~/venv with truss and magic-wormhole..."
+  echo "Ensuring ~/venv with truss..."
   # Common install locations for uv (curl installer + Homebrew).
   export PATH="$HOME/.local/bin:$HOME/.cargo/bin:/opt/homebrew/bin:/usr/local/bin:$PATH"
 
@@ -484,14 +517,65 @@ ensure_venv() {
   if [[ ! -x "$HOME/venv/bin/python" ]]; then
     uv venv "$HOME/venv"
   fi
-  uv pip install --python "$HOME/venv/bin/python" --upgrade truss magic-wormhole
+  uv pip install --python "$HOME/venv/bin/python" --upgrade truss
   if [[ -x "$HOME/venv/bin/truss" ]]; then
     echo "  truss: $("$HOME/venv/bin/truss" version 2>/dev/null || "$HOME/venv/bin/python" -c 'import truss; print(getattr(truss, "__version__", "installed"))')"
   fi
-  if [[ -x "$HOME/venv/bin/wormhole" ]]; then
-    mkdir -p "$HOME/.local/bin"
-    ln -sfn "$HOME/venv/bin/wormhole" "$HOME/.local/bin/wormhole"
-    echo "  wormhole: $("$HOME/venv/bin/wormhole" --version 2>/dev/null || echo installed)"
+  # magic-wormhole was replaced by croc; remove the stale venv symlink.
+  if [[ -L "$HOME/.local/bin/wormhole" ]]; then
+    rm -f "$HOME/.local/bin/wormhole"
   fi
   echo "  venv ready at $HOME/venv (activate with: source ~/venv/bin/activate)"
+}
+
+# Install croc (https://github.com/schollz/croc) for file transfer (replaces
+# magic-wormhole). Prefers Homebrew; falls back to the latest GitHub release
+# tarball into ~/.local/bin.
+ensure_croc() {
+  echo "Installing croc..."
+  if command -v brew >/dev/null 2>&1; then
+    brew install croc
+    croc --version 2>/dev/null || true
+    return 0
+  fi
+
+  mkdir -p "$HOME/.local/bin"
+  local os arch asset url tmp
+  case "$(uname -s)" in
+    Darwin) os="macOS" ;;
+    Linux)  os="Linux" ;;
+    *)
+      echo "WARNING: unsupported OS for croc binary install: $(uname -s)"
+      return 0
+      ;;
+  esac
+  case "$(uname -m)" in
+    arm64|aarch64) arch="ARM64" ;;
+    x86_64|amd64)  arch="64bit" ;;
+    *)
+      echo "WARNING: unsupported arch for croc binary install: $(uname -m)"
+      return 0
+      ;;
+  esac
+
+  # Resolve latest release tag via GitHub API; fall back to a known good version.
+  local tag
+  tag="$(curl -fsSL https://api.github.com/repos/schollz/croc/releases/latest \
+    | python3 -c 'import sys,json; print(json.load(sys.stdin)["tag_name"])' 2>/dev/null \
+    || true)"
+  tag="${tag:-v11.0.1}"
+  local ver="${tag#v}"
+  asset="croc_v${ver}_${os}-${arch}.tar.gz"
+  url="https://github.com/schollz/croc/releases/download/${tag}/${asset}"
+
+  tmp="$(mktemp -d)"
+  echo "  downloading $url ..."
+  if curl -fsSL "$url" | tar xz -C "$tmp" && [[ -f "$tmp/croc" ]]; then
+    install -m 755 "$tmp/croc" "$HOME/.local/bin/croc"
+    export PATH="$HOME/.local/bin:$PATH"
+    croc --version 2>/dev/null || true
+  else
+    echo "WARNING: failed to download/install croc from $url"
+  fi
+  rm -rf "$tmp"
 }

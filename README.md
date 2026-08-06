@@ -63,7 +63,7 @@ is skipped with a warning.
 ├── bin/
 │   ├── droid-export   # export a Factory "droid" session to JSONL / markdown
 │   ├── devpod-bundle  # pack/restore SSH + opencode/factory/cursor/grok CLI
-│   │                   #   auth+settings for wormhole Mac <-> dev pod
+│   │                   #   auth+settings for croc Mac <-> dev pod
 │   └── droid-to-opencode  -> droid-export   (compat symlink)
 ├── devpod-bundle      -> bin/devpod-bundle  (run from repo root on any host)
 ├── skills/            # Factory skill definitions (SKILL.md per skill)
@@ -89,8 +89,8 @@ is skipped with a warning.
   auth; the key file is carried to dev pods by `devpod-bundle`
 - tmux config symlinked to `~/.tmux.conf`
 - **~/venv** (via `uv`) with **truss** (Baseten model authoring / deploy-loop)
-  and **magic-wormhole** (file transfer, replaces croc); `wormhole` symlinked
-  to `~/.local/bin`
+- **croc** (file transfer, replaces magic-wormhole) - brew formula on macOS,
+  GitHub release binary into `~/.local/bin` on Linux
 
 ### Linux (`setup.sh`)
 
@@ -107,7 +107,7 @@ is skipped with a warning.
 
 ### macOS (`brew-setup.sh`)
 
-- Homebrew formulae: `baseten gh node mole rtk tmux uv`
+- Homebrew formulae: `baseten croc gh node mole rtk tmux uv`
 - Homebrew casks: `brave-browser@beta grok-build iterm2`
 - `~/.baseten_aliases` created if missing; the managed `ksh` shell helper is
   (re)written and a copy kept in the repo for version control
@@ -167,7 +167,7 @@ input), `tool_result`. System-reminder noise blocks are dropped.
 ## devpod-bundle (`bin/devpod-bundle`)
 
 Pack the auth + settings for SSH, opencode, Factory droid, Cursor CLI, and
-grok CLI into one tar.gz, wormhole it to a dev pod, and restore it there -
+grok CLI into one tar.gz, croc it to a dev pod, and restore it there -
 so you only stay logged in on one machine (your Mac).
 
 Paths in the archive are relative to `$HOME`, so restore works on any pod
@@ -183,7 +183,7 @@ rc files source it via a managed block added by `setup.sh` / `brew-setup.sh`
 devpod-bundle                          # writes ~/devpod-bundle-<stamp>.tar.gz
 devpod-bundle --list                   # dry run, write nothing
 devpod-bundle -o /tmp/x.tgz            # custom output path
-wormhole send ~/devpod-bundle-*.tar.gz
+croc send ~/devpod-bundle-*.tar.gz
 
 # On the dev pod (after `git pull` of this repo at ~/dotfiles):
 ~/dotfiles/devpod-bundle --restore ~/devpod-bundle-*.tar.gz

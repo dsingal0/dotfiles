@@ -171,6 +171,9 @@ install_skill_packages
 # Homebrew if available, else GitHub release -> ~/.local/bin
 install_baseten_cli
 
+# croc file transfer (https://github.com/schollz/croc); replaces magic-wormhole
+ensure_croc
+
 # Install/update Herdr bash completions (herdr is installed out-of-band; this
 # regenerates the script so it stays in sync with the installed binary).
 if command -v herdr >/dev/null 2>&1; then
@@ -181,7 +184,7 @@ if command -v herdr >/dev/null 2>&1; then
   append_once "$HOME/.bashrc" '[[ -r "$HOME/.local/share/bash-completion/completions/herdr" ]] && source "$HOME/.local/share/bash-completion/completions/herdr"'
 fi
 
-# ~/venv with truss (Baseten model authoring / deploy-loop) and magic-wormhole
+# ~/venv with truss (Baseten model authoring / deploy-loop)
 ensure_venv
 
 # Install/update iTerm2 shell integration + utilities (works over SSH too, so

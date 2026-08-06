@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # devpod-bundle - pack auth + settings for SSH, opencode, factory droid,
-# cursor CLI, and grok CLI into a single tar.gz so they can be wormholed
+# cursor CLI, and grok CLI into a single tar.gz so they can be sent via croc
 # to a dev pod and unpacked into the right locations.
 #
 # Two modes:
@@ -232,5 +232,5 @@ echo
 echo "archive contents:"
 tar -tzf "$OUT" | sed 's/^/  /'
 echo
-echo "send it:   wormhole send \"$OUT\""
+echo "send it:   croc send \"$OUT\""
 echo "restore:   ~/dotfiles/devpod-bundle --restore \"$OUT\"   (on the pod)"

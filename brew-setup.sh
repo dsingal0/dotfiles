@@ -18,7 +18,7 @@ brew trust basetenlabs/baseten 2>/dev/null || true
 # Packages to install and keep up to date
 # `node` provides npm, used below to install paseo.
 # `baseten` = basetenlabs/baseten-cli (https://github.com/basetenlabs/baseten-cli); `uv` for ~/venv + truss.
-FORMULAS=(baseten btop gh node mole rtk tmux uv)
+FORMULAS=(baseten btop croc gh node mole rtk tmux uv)
 # iterm2 = terminal emulator. grok-build has no official curl installer, so it
 # stays a cask; droid / opencode / cursor-cli install via curl instead.
 CASKS=(brave-browser@beta iterm2)
@@ -129,7 +129,7 @@ install_skill_packages true
 # baseten CLI is installed via the FORMULAS brew loop above; ensure version prints
 baseten --version 2>/dev/null || baseten version 2>/dev/null || true
 
-# ~/venv with truss (Baseten model authoring / deploy-loop) and magic-wormhole
+# ~/venv with truss (Baseten model authoring / deploy-loop)
 ensure_venv
 
 # Install paseo CLI via npm (pre-release track via the `beta` dist-tag, latest npm from brew's node formula)
