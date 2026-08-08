@@ -19,9 +19,10 @@ brew trust basetenlabs/baseten 2>/dev/null || true
 # `node` provides npm, used below to install paseo.
 # `baseten` = basetenlabs/baseten-cli (https://github.com/basetenlabs/baseten-cli); `uv` for ~/venv + truss.
 FORMULAS=(baseten btop croc gh node mole rtk tmux uv)
-# iterm2 = terminal emulator. grok-build has no official curl installer, so it
+# ghostty = terminal emulator. grok-build has no official curl installer, so it
 # stays a cask; droid / opencode install via npm below, cursor-cli via curl.
-CASKS=(brave-browser@beta iterm2)
+# font-jetbrains-mono-nerd-font = JetBrains Mono with Nerd Font glyphs for TUIs.
+CASKS=(brave-browser@beta ghostty font-jetbrains-mono-nerd-font)
 CASKS+=(grok-build)
 
 # Install (no-op if already installed). Continue on individual failures.
@@ -60,10 +61,6 @@ for pkg in "${CASKS[@]}"; do
   brew install --cask "$pkg" || echo "Warning: failed to install cask '$pkg' (continuing)"
 done
 
-# Install/update iTerm2 shell integration + utilities (iterm2 cask above).
-echo "Installing iTerm2 shell integration..."
-curl -L https://iterm2.com/shell_integration/install_shell_integration_and_utilities.sh | bash || true
-
 # Upgrade all installed packages (formulae and casks)
 echo "Checking for outdated packages..."
 brew outdated --greedy || true
@@ -73,6 +70,10 @@ yes | brew upgrade --greedy || echo "Warning: brew upgrade --greedy failed (cont
 # Symlink tmux config (enables mouse scroll passthrough for Droid in tmux)
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ln -sf "$SCRIPT_DIR/tmux.conf" "$HOME/.tmux.conf"
+
+# Symlink Ghostty config (terminal font + SSH shell integration)
+mkdir -p "$HOME/.config/ghostty"
+ln -sf "$SCRIPT_DIR/ghostty.conf" "$HOME/.config/ghostty/config"
 
 # Link custom user scripts into ~/.local/bin
 mkdir -p "$HOME/.local/bin"

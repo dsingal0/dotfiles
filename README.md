@@ -108,12 +108,11 @@ is skipped with a warning.
 ### macOS (`brew-setup.sh`)
 
 - Homebrew formulae: `baseten croc gh node mole rtk tmux uv`
-- Homebrew casks: `brave-browser@beta grok-build iterm2`
+- Homebrew casks: `brave-browser@beta grok-build ghostty font-jetbrains-mono-nerd-font`
 - `~/.baseten_aliases` created if missing; the managed `ksh` shell helper is
   (re)written and a copy kept in the repo for version control
-- **opencode**, **droid**, and **cursor-cli** (official curl installers),
+- **opencode** and **droid** (npm), **cursor-cli** (official curl installer),
   **paseo** (npm)
-
 ## tmux config (`tmux.conf`)
 
 Tuned for running TUI agents (Droid, Claude Code, opencode) inside tmux,
@@ -122,7 +121,7 @@ scripts. Highlights:
 
 - **mouse on** - wheel events pass through to mouse-tracking TUIs
 - **extended-keys** with CSI-u (tmux 3.3+ guarded, so 3.2a doesn't error)
-- **256-color + RGB** for `xterm-256color` (iTerm2)
+- **256-color + RGB** for `xterm-256color` (Ghostty)
 - **escape-time 0** - responsive modal editors
 - **focus-events on** - editors/watchers get focus/blur
 - **history-limit 100000** - long agent transcripts reachable in copy mode

@@ -202,9 +202,4 @@ fi
 # ~/venv with truss (Baseten model authoring / deploy-loop)
 ensure_venv
 
-# Install/update iTerm2 shell integration + utilities (works over SSH too, so
-# dev pods get marks/badges in local iTerm2 sessions). Best-effort.
-echo "Installing iTerm2 shell integration..."
-curl -L https://iterm2.com/shell_integration/install_shell_integration_and_utilities.sh | bash || true
-
 echo "Setup complete!"
