@@ -20,7 +20,7 @@ brew trust basetenlabs/baseten 2>/dev/null || true
 # `baseten` = basetenlabs/baseten-cli (https://github.com/basetenlabs/baseten-cli); `uv` for ~/venv + truss.
 FORMULAS=(baseten btop croc gh node mole rtk tmux uv)
 # iterm2 = terminal emulator. grok-build has no official curl installer, so it
-# stays a cask; droid / opencode / cursor-cli install via curl instead.
+# stays a cask; droid / opencode install via npm below, cursor-cli via curl.
 CASKS=(brave-browser@beta iterm2)
 CASKS+=(grok-build)
 
@@ -29,15 +29,14 @@ for pkg in "${FORMULAS[@]}"; do
   brew install "$pkg" || echo "Warning: failed to install formula '$pkg' (continuing)"
 done
 
-# Coding harnesses: official curl installers are preferred over package
-# managers. opencode goes FIRST, then droid (Factory CLI); grok-build is in
-# the cask loop below and cursor-cli is further down.
+# Coding harnesses: opencode and droid install via npm (latest), grok-build is
+# in the cask loop below and cursor-cli is further down.
 echo "Installing opencode..."
-curl -fsSL https://opencode.ai/install | bash
+npm i -g opencode-ai
 opencode --version
 
 echo "Installing droid..."
-curl -fsSL https://app.factory.ai/cli | sh
+npm install -g droid
 droid --version 2>/dev/null || true
 
 for pkg in "${CASKS[@]}"; do
@@ -109,7 +108,7 @@ echo "Installing cursor-cli..."
 curl -fsS https://cursor.com/install | bash
 cursor --version 2>/dev/null || true
 
-# droid is installed via the official curl installer above
+# droid is installed via npm above
 
 # Configure Factory: Baseten BYOK custom models (~/.factory/settings.json) and
 # FACTORY_API_KEY exported to shell rc files for the droid CLI.

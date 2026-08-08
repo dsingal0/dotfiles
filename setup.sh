@@ -66,23 +66,20 @@ node -v # Should print "v26.2.0".
 # Verify npm version:
 npm -v # Should print "11.13.0".
 
-# Install/update opencode (stable) - official curl installer preferred over
-# package managers; npm is the fallback.
+# Install/update opencode (stable) via npm; the global bin is already on PATH
+# through nvm, so no PATH export is needed.
 echo "Installing opencode..."
-curl -fsSL https://opencode.ai/install | bash || npm i -g opencode-ai
-# The opencode installer puts the binary in ~/.opencode/bin and only adds it to
-# PATH via .bashrc (not sourced in this running shell), so export it here.
-export PATH="$HOME/.opencode/bin:$PATH"
+npm i -g opencode-ai
 opencode --version
 
 configure_opencode_permission
 
-# Install droid (Factory CLI) via the official curl installer (preferred over
-# package managers); npm is the fallback. allow-scripts covers the npm
-# fallback paths for droid and opencode-ai.
+# Install droid (Factory CLI) via npm - the official curl installer lags the
+# npm release (it's pinned to an older version), so npm gets the latest.
+# allow-scripts covers droid's postinstall.
 npm config set allow-scripts="droid,opencode-ai" --location=user
 echo "Installing droid..."
-curl -fsSL https://app.factory.ai/cli | sh || npm install -g droid
+npm install -g droid
 
 # Install/update gh
 echo "Installing gh..."
