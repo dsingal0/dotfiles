@@ -21,6 +21,11 @@
 # regardless of the pod's username. The --restore mode does exactly that,
 # minus the RESTORE.txt note.
 #
+# opencode auth lives in ~/.local/share/opencode/auth.json for both V1 and V2
+# (opencode2 reads the same file). V2 (OPENCODE_V2=1) additionally adds the new
+# ~/.config/opencode/cli.json settings file. opencode.json (global config) is
+# bundled for both.
+#
 # Cursor CLI auth uses an API key (CURSOR_API_KEY) stored in ~/.cursor/env
 # (mode 600, outside this repo). That file IS bundled, so it travels Mac ->
 # pod via the archive; shell rc files source it via a managed block added by
@@ -101,11 +106,30 @@ DEFAULT_OUT="$HOME_DIR/devpod-bundle-$STAMP.tar.gz"
 [ -z "$OUT" ] && OUT="$DEFAULT_OUT"
 
 # Absolute source paths. All must live under $HOME. Each entry is bundled
-# recursively (if a dir) or as a single file.
-abs_paths=(
-  "$HOME_DIR/.ssh"
-  "$HOME_DIR/.local/share/opencode/auth.json"
-  "$HOME_DIR/.config/opencode/opencode.json"
+# recursively (if a dir) or as a single file. Built incrementally so the
+# opencode auth set can differ between V1 and V2.
+abs_paths=()
+labels=()
+
+# ssh (always bundled)
+abs_paths+=("$HOME_DIR/.ssh")
+labels+=("ssh (dir)")
+
+# opencode: both V1 and V2 store /connect credentials in auth.json (opencode2
+# reads the same ~/.local/share/opencode/auth.json). V2 additionally adds a
+# cli.json settings file.
+abs_paths+=("$HOME_DIR/.local/share/opencode/auth.json")
+labels+=("opencode auth")
+if [[ "${OPENCODE_V2:-}" == "1" ]]; then
+  abs_paths+=("$HOME_DIR/.config/opencode/cli.json")
+  labels+=("opencode2 CLI/TUI settings")
+fi
+# opencode.json is the global config for both V1 and V2.
+abs_paths+=("$HOME_DIR/.config/opencode/opencode.json")
+labels+=("opencode settings")
+
+# factory droid
+abs_paths+=(
   "$HOME_DIR/.factory/auth.v2.file"
   "$HOME_DIR/.factory/auth.v2.key"
   "$HOME_DIR/.factory/auth.v2.loginkeychain"
@@ -114,19 +138,8 @@ abs_paths=(
   "$HOME_DIR/.factory/mission-readiness-warnings-shown.json"
   "$HOME_DIR/.factory/droids"
   "$HOME_DIR/.factory/crons"
-  "$HOME_DIR/.cursor/cli-config.json"
-  "$HOME_DIR/.cursor/agent-cli-state.json"
-  "$HOME_DIR/.cursor/env"
-  "$HOME_DIR/.grok/auth.json"
-  "$HOME_DIR/.grok/config.toml"
 )
-
-# A short label for each path, used in the report (kept in lockstep with
-# abs_paths via the same index).
-labels=(
-  "ssh (dir)"
-  "opencode auth"
-  "opencode settings"
+labels+=(
   "factory droid auth (login file)"
   "factory droid auth (login key)"
   "factory droid auth (login keychain)"
@@ -135,9 +148,26 @@ labels=(
   "factory droid mission prefs (readiness warnings shown)"
   "factory droid custom droids (dir)"
   "factory droid cron missions (dir)"
+)
+
+# cursor CLI
+abs_paths+=(
+  "$HOME_DIR/.cursor/cli-config.json"
+  "$HOME_DIR/.cursor/agent-cli-state.json"
+  "$HOME_DIR/.cursor/env"
+)
+labels+=(
   "cursor CLI settings"
   "cursor CLI state"
   "cursor CLI auth (API key)"
+)
+
+# grok CLI
+abs_paths+=(
+  "$HOME_DIR/.grok/auth.json"
+  "$HOME_DIR/.grok/config.toml"
+)
+labels+=(
   "grok CLI auth"
   "grok CLI settings"
 )
@@ -213,6 +243,13 @@ trap 'rm -rf "$TMP_BUNDLE"' EXIT
   echo "  - factory droid settings/preferences ARE bundled: settings.json"
   echo "    (custom models, session defaults, trusted folders), custom droids"
   echo "    (~/.factory/droids), and cron missions (~/.factory/crons)."
+  if [[ "${OPENCODE_V2:-}" == "1" ]]; then
+    echo "  - opencode auth IS bundled via ~/.local/share/opencode/auth.json"
+    echo "    (opencode2 reads the same file). Its cli.json settings are bundled"
+    echo "    too; global opencode.json is always bundled."
+  else
+    echo "  - opencode auth IS bundled via ~/.local/share/opencode/auth.json."
+  fi
 } > "$TMP_BUNDLE/RESTORE.txt"
 
 # Build the archive. Paths are stored relative to $HOME via -C "$HOME_DIR";

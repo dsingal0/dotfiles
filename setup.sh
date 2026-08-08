@@ -66,18 +66,36 @@ node -v # Should print "v26.2.0".
 # Verify npm version:
 npm -v # Should print "11.13.0".
 
-# Install/update opencode (stable) via npm; the global bin is already on PATH
-# through nvm, so no PATH export is needed.
+# npm postinstall allow-list for packages that need build/postinstall scripts:
+# droid, opencode-ai, and the V2 beta @opencode-ai/cli (which selects the native
+# binary via a trusted postinstall script).
+npm config set allow-scripts="droid,opencode-ai,@opencode-ai/cli" --location=user
+
+# Drop any opencode binary left by the old curl installer (~/.opencode/bin) so
+# the npm-managed binary is the one on PATH.
+rm -f "$HOME/.opencode/bin/opencode" 2>/dev/null || true
+rmdir "$HOME/.opencode/bin" 2>/dev/null || true
+
+# Install/update opencode. Default is the stable V1 (opencode-ai). Set
+# OPENCODE_V2=1 to uninstall V1 and install the V2 beta (@opencode-ai/cli@next,
+# which runs as `opencode2`). The global bin is already on PATH via nvm.
 echo "Installing opencode..."
-npm i -g opencode-ai
-opencode --version
+if [[ "${OPENCODE_V2:-}" == "1" ]]; then
+  npm uninstall -g opencode-ai || true
+  npm install -g @opencode-ai/cli@next
+  opencode2 --version || true
+else
+  npm i -g opencode-ai
+  opencode --version
+fi
 
 configure_opencode_permission
 
 # Install droid (Factory CLI) via npm - the official curl installer lags the
 # npm release (it's pinned to an older version), so npm gets the latest.
-# allow-scripts covers droid's postinstall.
-npm config set allow-scripts="droid,opencode-ai" --location=user
+# Drop the droid binary left by the old curl installer (~/.local/bin/droid) so
+# the npm-managed binary is the one on PATH.
+rm -f "$HOME/.local/bin/droid" 2>/dev/null || true
 echo "Installing droid..."
 npm install -g droid
 
