@@ -1,0 +1,46 @@
+# Model endpoint readiness: {{ model_alias }}
+
+## Target
+
+| Field | Value |
+|---|---|
+| Endpoint | {{ endpoint }} |
+| Model alias | {{ model_alias }} |
+| Provider | {{ provider }} |
+| Protocol | {{ protocol }} |
+| Environment | {{ environment }} |
+| Evaluated at | {{ timestamp }} |
+
+## Authoritative contract
+
+| Requirement | Source and retrieval date | Endpoint probe | Pass condition | Applicability | Result | Evidence |
+|---|---|---|---|---|---|---|
+| {{ feature }} | {{ source }} | {{ request_shape }} | {{ pass_condition }} | REQUIRED | NOT RUN | |
+
+## Hard gates
+
+| Gate | Required | Observed | Result | Evidence |
+|---|---:|---:|---|---|
+| Advertised context window | {{ context_tokens }} tokens | | NOT RUN | |
+| Default output, with no client output limit | >= 16,384 tokens | | NOT RUN | |
+| Complete applicable smoke suite | 100% | | NOT RUN | |
+
+## Smoke cases
+
+| Harness revision | Cases run | Passed | Failed | Not applicable | Evidence |
+|---|---|---:|---:|---:|---|
+| | | | | | |
+
+## Verdict
+
+`BLOCKED`
+
+### Failures and blockers
+
+- {{ blocker_or_none }}
+
+### Artifact inventory
+
+- Token-limit evidence: {{ token_limit_evidence }}
+- Smoke log: {{ smoke_log }}
+- Feature-probe evidence: {{ feature_evidence }}

@@ -1,0 +1,4 @@
+interface:
+  display_name: "Validate Model Endpoint Readiness"
+  short_description: "Gate model endpoints before deployment"
+  default_prompt: "Use $validate-model-endpoint-readiness to prove this model endpoint meets its functional deployment gates."
