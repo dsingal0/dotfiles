@@ -32,23 +32,21 @@ done
 
 # Coding harnesses: opencode and droid install via npm (latest), grok-build is
 # in the cask loop below and cursor-cli is further down.
-# opencode defaults to the stable V1 (opencode-ai). Set OPENCODE_V2=1 to
-# uninstall V1 and install the V2 beta (@opencode-ai/cli@next, runs as
-# `opencode2`); allow-scripts covers its trusted postinstall binary selection.
-npm config set allow-scripts="droid,opencode-ai,@opencode-ai/cli" --location=user
+# opencode v2 (@opencode-ai/cli@next) replaces v1 (opencode-ai): uninstall any
+# leftover v1, then install/update v2. allow-scripts covers its trusted
+# postinstall binary selection.
+npm config set allow-scripts="droid,@opencode-ai/cli" --location=user
 # Drop any opencode binary left by the old curl installer (~/.opencode/bin) so
 # the npm-managed binary is the one on PATH.
 rm -f "$HOME/.opencode/bin/opencode" 2>/dev/null || true
 rmdir "$HOME/.opencode/bin" 2>/dev/null || true
-echo "Installing opencode..."
-if [[ "${OPENCODE_V2:-}" == "1" ]]; then
-  npm uninstall -g opencode-ai || true
-  npm install -g @opencode-ai/cli@next
-  opencode2 --version 2>/dev/null || true
-else
-  npm i -g opencode-ai
-  opencode --version
-fi
+echo "Installing opencode (v2)..."
+npm uninstall -g opencode-ai || true
+npm install -g @opencode-ai/cli@next
+opencode2 --version 2>/dev/null || true
+
+# Install/update Meta CLI.
+curl -fsSL https://dev.meta.ai/install.sh | bash
 
 # Drop the droid binary left by the old curl installer (~/.local/bin/droid) so
 # the npm-managed binary is the one on PATH.

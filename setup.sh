@@ -67,27 +67,24 @@ node -v # Should print "v26.2.0".
 npm -v # Should print "11.13.0".
 
 # npm postinstall allow-list for packages that need build/postinstall scripts:
-# droid, opencode-ai, and the V2 beta @opencode-ai/cli (which selects the native
-# binary via a trusted postinstall script).
-npm config set allow-scripts="droid,opencode-ai,@opencode-ai/cli" --location=user
+# droid and opencode v2 (@opencode-ai/cli, which selects the native binary via a
+# trusted postinstall script). opencode v1 (opencode-ai) is no longer installed.
+npm config set allow-scripts="droid,@opencode-ai/cli" --location=user
 
 # Drop any opencode binary left by the old curl installer (~/.opencode/bin) so
 # the npm-managed binary is the one on PATH.
 rm -f "$HOME/.opencode/bin/opencode" 2>/dev/null || true
 rmdir "$HOME/.opencode/bin" 2>/dev/null || true
 
-# Install/update opencode. Default is the stable V1 (opencode-ai). Set
-# OPENCODE_V2=1 to uninstall V1 and install the V2 beta (@opencode-ai/cli@next,
-# which runs as `opencode2`). The global bin is already on PATH via nvm.
-echo "Installing opencode..."
-if [[ "${OPENCODE_V2:-}" == "1" ]]; then
-  npm uninstall -g opencode-ai || true
-  npm install -g @opencode-ai/cli@next
-  opencode2 --version || true
-else
-  npm i -g opencode-ai
-  opencode --version
-fi
+# Install/update opencode v2 (@opencode-ai/cli@next, which runs as `opencode2`).
+# The global bin is already on PATH via nvm.
+echo "Installing opencode (v2)..."
+npm uninstall -g opencode-ai || true
+npm install -g @opencode-ai/cli@next
+opencode2 --version || true
+
+# Install/update Meta CLI.
+curl -fsSL https://dev.meta.ai/install.sh | bash
 
 configure_opencode_permission
 
