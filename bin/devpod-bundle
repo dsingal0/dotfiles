@@ -21,10 +21,9 @@
 # regardless of the pod's username. The --restore mode does exactly that,
 # minus the RESTORE.txt note.
 #
-# opencode auth lives in ~/.local/share/opencode/auth.json for both V1 and V2
-# (opencode2 reads the same file). V2 (OPENCODE_V2=1) additionally adds the new
-# ~/.config/opencode/cli.json settings file. opencode.json (global config) is
-# bundled for both.
+# opencode v2 (opencode2) auth lives in ~/.local/share/opencode/auth.json and
+# settings live in ~/.config/opencode/cli.json; global opencode.json is bundled
+# too. Only v2 is installed now; the v1 (opencode-ai) cases are gone.
 #
 # Cursor CLI auth uses an API key (CURSOR_API_KEY) stored in ~/.cursor/env
 # (mode 600, outside this repo). That file IS bundled, so it travels Mac ->
@@ -106,8 +105,8 @@ DEFAULT_OUT="$HOME_DIR/devpod-bundle-$STAMP.tar.gz"
 [ -z "$OUT" ] && OUT="$DEFAULT_OUT"
 
 # Absolute source paths. All must live under $HOME. Each entry is bundled
-# recursively (if a dir) or as a single file. Built incrementally so the
-# opencode auth set can differ between V1 and V2.
+# recursively (if a dir) or as a single file. Built incrementally so missing
+# optional files can be skipped cleanly.
 abs_paths=()
 labels=()
 
@@ -115,16 +114,12 @@ labels=()
 abs_paths+=("$HOME_DIR/.ssh")
 labels+=("ssh (dir)")
 
-# opencode: both V1 and V2 store /connect credentials in auth.json (opencode2
-# reads the same ~/.local/share/opencode/auth.json). V2 additionally adds a
-# cli.json settings file.
+# opencode v2: /connect credentials in auth.json, cli.json settings, and the
+# global opencode.json config — all bundled.
 abs_paths+=("$HOME_DIR/.local/share/opencode/auth.json")
 labels+=("opencode auth")
-if [[ "${OPENCODE_V2:-}" == "1" ]]; then
-  abs_paths+=("$HOME_DIR/.config/opencode/cli.json")
-  labels+=("opencode2 CLI/TUI settings")
-fi
-# opencode.json is the global config for both V1 and V2.
+abs_paths+=("$HOME_DIR/.config/opencode/cli.json")
+labels+=("opencode2 CLI/TUI settings")
 abs_paths+=("$HOME_DIR/.config/opencode/opencode.json")
 labels+=("opencode settings")
 
@@ -243,13 +238,9 @@ trap 'rm -rf "$TMP_BUNDLE"' EXIT
   echo "  - factory droid settings/preferences ARE bundled: settings.json"
   echo "    (custom models, session defaults, trusted folders), custom droids"
   echo "    (~/.factory/droids), and cron missions (~/.factory/crons)."
-  if [[ "${OPENCODE_V2:-}" == "1" ]]; then
-    echo "  - opencode auth IS bundled via ~/.local/share/opencode/auth.json"
-    echo "    (opencode2 reads the same file). Its cli.json settings are bundled"
-    echo "    too; global opencode.json is always bundled."
-  else
-    echo "  - opencode auth IS bundled via ~/.local/share/opencode/auth.json."
-  fi
+  echo "  - opencode v2 auth IS bundled via ~/.local/share/opencode/auth.json."
+  echo "    Its cli.json settings are bundled too; global opencode.json is"
+  echo "    always bundled."
 } > "$TMP_BUNDLE/RESTORE.txt"
 
 # Build the archive. Paths are stored relative to $HOME via -C "$HOME_DIR";
