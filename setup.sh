@@ -83,6 +83,11 @@ npm uninstall -g opencode-ai || true
 npm install -g @opencode-ai/cli@next
 opencode2 --version || true
 
+# Install/update OpenChamber (web UI + mobile app server on top of opencode).
+# Pairs with the Android app via `openchamber connect-url --relay --qr`.
+echo "Installing OpenChamber..."
+curl -fsSL https://raw.githubusercontent.com/openchamber/openchamber/main/scripts/install.sh | bash
+
 # Install/update Meta CLI.
 curl -fsSL https://dev.meta.ai/install.sh | bash
 
