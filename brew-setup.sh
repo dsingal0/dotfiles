@@ -89,13 +89,15 @@ ln -sf "$SCRIPT_DIR/ghostty.conf" "$HOME/.config/ghostty/config"
 
 # Link custom user scripts into ~/.local/bin
 mkdir -p "$HOME/.local/bin"
-ln -sf "$SCRIPT_DIR/bin/droid-export" "$HOME/.local/bin/droid-export"
+rm -f "$HOME/.local/bin/droid-export"
 ln -sf "$SCRIPT_DIR/bin/devpod-bundle" "$HOME/.local/bin/devpod-bundle"
 export PATH="$HOME/.local/bin:$PATH"
 
 # Source shared config helpers (opencode permission + Baseten BYOK models),
 # deduplicated with setup.sh so both bootstrap scripts stay in sync.
 . "$SCRIPT_DIR/lib/shared.sh"
+
+ensure_pnpm_shell_path
 
 # Manage ~/.baseten_aliases (create if missing) and ensure the `ksh` shell helper
 # is defined. Keeps a copy in the dotfiles repo for version control.

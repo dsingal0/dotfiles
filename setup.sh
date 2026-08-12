@@ -45,7 +45,7 @@ tmux source-file "$HOME/.tmux.conf" 2>/dev/null || true
 
 # Link custom user scripts into ~/.local/bin (on PATH via the uv step below)
 mkdir -p "$HOME/.local/bin"
-ln -sf "$SCRIPT_DIR/bin/droid-export" "$HOME/.local/bin/droid-export"
+rm -f "$HOME/.local/bin/droid-export"
 ln -sf "$SCRIPT_DIR/bin/devpod-bundle" "$HOME/.local/bin/devpod-bundle"
 
 # Download and install/update nvm:
@@ -80,6 +80,7 @@ case "$(uname -s)" in
 esac
 export PNPM_HOME
 export PATH="$PNPM_HOME/bin:$PATH"
+ensure_pnpm_shell_path
 
 # Uninstall the npm-managed copies of packages now handled by pnpm, so no
 # stale npm binaries linger on PATH.

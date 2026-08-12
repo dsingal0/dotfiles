@@ -210,6 +210,53 @@ PYEOF
   done
 }
 
+# Persist PNPM_HOME and $PNPM_HOME/bin on PATH in shell rc files. pnpm global
+# installs (opencode, droid, paseo) land in $PNPM_HOME/bin; setup scripts export
+# that for the current run but new shells need this block to find those CLIs.
+ensure_pnpm_shell_path() {
+  local pnpm_home
+  case "$(uname -s)" in
+    Darwin) pnpm_home="$HOME/Library/pnpm" ;;
+    *)      pnpm_home="$HOME/.local/share/pnpm" ;;
+  esac
+  local rc_files=( "$HOME/.bashrc" )
+  [[ -f "$HOME/.zshrc" ]] && rc_files+=( "$HOME/.zshrc" )
+  local rc
+  for rc in "${rc_files[@]}"; do
+    touch "$rc"
+    PNPM_HOME_VALUE="$pnpm_home" python3 - "$rc" << 'PYEOF'
+import os, re, sys
+
+path = sys.argv[1]
+pnpm_home = os.environ["PNPM_HOME_VALUE"]
+open_m = "# >>> pnpm global bins (managed by dotfiles setup) >>>"
+close_m = "# <<< pnpm global bins <<<"
+block = (
+    "%s\n"
+    "export PNPM_HOME=\"%s\"\n"
+    "case \":$PATH:\" in\n"
+    "  *\":$PNPM_HOME/bin:\"*) ;;\n"
+    "  *) export PATH=\"$PNPM_HOME/bin:$PATH\" ;;\n"
+    "esac\n"
+    "%s"
+) % (open_m, pnpm_home.replace("\\", "\\\\").replace('"', '\\"'), close_m)
+try:
+    with open(path) as f:
+        content = f.read()
+except FileNotFoundError:
+    content = ""
+pat = re.compile(r"\n?" + re.escape(open_m) + r".*?" + re.escape(close_m) + r"\n?", re.DOTALL)
+content = pat.sub("\n", content)
+content = content.rstrip()
+if content:
+    content += "\n\n"
+content += block + "\n"
+with open(path, "w") as f:
+    f.write(content)
+PYEOF
+  done
+}
+
 # One-shot Factory configuration shared by both bootstrap scripts:
 #   1. load .env (BASETEN_API_KEY, FACTORY_API_KEY)
 #   2. write Baseten BYOK custom models into ~/.factory/settings.json
