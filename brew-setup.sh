@@ -54,7 +54,9 @@ rm -f "$HOME/.opencode/bin/opencode" 2>/dev/null || true
 rmdir "$HOME/.opencode/bin" 2>/dev/null || true
 echo "Installing opencode (v1)..."
 pnpm remove -g @opencode-ai/cli 2>/dev/null || true
-pnpm add -g opencode-ai
+# --allow-build=opencode-ai: v1 fetches its native binary via a postinstall
+# script, which pnpm blocks by default.
+pnpm add -g --allow-build=opencode-ai opencode-ai
 opencode --version 2>/dev/null || true
 
 # Install/update Meta CLI.

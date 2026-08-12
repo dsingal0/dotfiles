@@ -94,7 +94,9 @@ rmdir "$HOME/.opencode/bin" 2>/dev/null || true
 # (@opencode-ai/cli) from both npm and pnpm so no stale binary lingers.
 echo "Installing opencode (v1)..."
 pnpm remove -g @opencode-ai/cli 2>/dev/null || true
-pnpm add -g opencode-ai
+# --allow-build=opencode-ai: v1 fetches its native binary via a postinstall
+# script, which pnpm blocks by default.
+pnpm add -g --allow-build=opencode-ai opencode-ai
 opencode --version || true
 
 # Install/update Meta CLI.
