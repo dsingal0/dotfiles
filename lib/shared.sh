@@ -389,9 +389,14 @@ install_shared_skills() {
 #
 # Packs:
 #   https://github.com/mattpocock/skills
-#   https://github.com/basetenlabs/baseten-skills
 #   https://github.com/expo/skills
 #   https://github.com/emilkowalski/skills  (opt-in, see $1)
+#
+# The baseten skill used to come from https://github.com/basetenlabs/baseten-skills
+# but that pack is out of date and token-inefficient. It now lives as a static,
+# pruned, BIS-focused copy in this repo under skills/baseten/ and is installed
+# by install_shared_skills (same as the other personal skills). The stale
+# third-party install is cleaned up by cleanup_stale_baseten_skill below.
 #
 # Agents are listed explicitly rather than --agent '*': Eve and PromptScript
 # do not support global skill installation and would otherwise emit failures.
@@ -411,7 +416,6 @@ install_skill_packages() {
 
   local packs=(
     "mattpocock/skills"
-    "basetenlabs/baseten-skills"
     "expo/skills"
   )
   if [[ "$include_emilkowalski" == "true" ]]; then
@@ -484,6 +488,31 @@ for entry in sorted(glob.glob(os.path.join(home, ".*"))):
         removed += 1
 print(f"Stale skill dirs removed: {removed}")
 PYEOF
+}
+
+# Remove the stale third-party `baseten` skill (from basetenlabs/baseten-skills)
+# at every agent skill location so install_shared_skills can symlink the
+# repo's static, pruned, BIS-focused copy (skills/baseten/) in its place.
+#
+# Only removes real directories / files — never symlinks (so a re-run after the
+# repo symlink exists is a no-op). Idempotent.
+cleanup_stale_baseten_skill() {
+  local locations=(
+    "$HOME/.agents/skills/baseten"
+    "$HOME/.factory/skills/baseten"
+    "$HOME/.config/opencode/skills/baseten"
+    "$HOME/.cursor/skills/baseten"
+    "$HOME/.grok/skills/baseten"
+  )
+  local loc removed=0
+  for loc in "${locations[@]}"; do
+    if [[ -e "$loc" && ! -L "$loc" ]]; then
+      rm -rf "$loc"
+      echo "  removed stale third-party baseten skill: $loc"
+      removed=$((removed + 1))
+    fi
+  done
+  echo "Stale baseten skill entries removed: $removed"
 }
 
 # Install the Baseten CLI (https://github.com/basetenlabs/baseten-cli).

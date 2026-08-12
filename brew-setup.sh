@@ -151,10 +151,17 @@ cursor --version 2>/dev/null || true
 configure_factory "$SCRIPT_DIR"
 configure_cursor
 
+# Remove the stale third-party baseten skill (basetenlabs/baseten-skills) so the
+# repo's static, pruned, BIS-focused copy (skills/baseten/) gets symlinked in
+# its place by install_shared_skills below.
+cleanup_stale_baseten_skill
+
 # Install personal skills into every harness (droid / opencode / cursor / grok)
 install_shared_skills "$SCRIPT_DIR"
 
-# Third-party skill packs (mattpocock + basetenlabs + emilkowalski) for all agents
+# Third-party skill packs (mattpocock + emilkowalski) for all agents. The baseten
+# skill is no longer pulled from basetenlabs/baseten-skills (out of date); it
+# lives as a static copy in this repo under skills/baseten/ (installed above).
 install_skill_packages true
 
 # baseten CLI is installed via the FORMULAS brew loop above; ensure version prints

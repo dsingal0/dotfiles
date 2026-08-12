@@ -203,10 +203,17 @@ git config --global user.email "dhruvsingalabc@gmail.com"
 configure_factory "$SCRIPT_DIR"
 configure_cursor
 
+# Remove the stale third-party baseten skill (basetenlabs/baseten-skills) so the
+# repo's static, pruned, BIS-focused copy (skills/baseten/) gets symlinked in
+# its place by install_shared_skills below.
+cleanup_stale_baseten_skill
+
 # Install personal skills into every harness (droid / opencode / cursor)
 install_shared_skills "$SCRIPT_DIR" false
 
-# Third-party skill packs (mattpocock + basetenlabs) for all agents
+# Third-party skill packs (mattpocock + expo) for all agents. The baseten skill
+# is no longer pulled from basetenlabs/baseten-skills (out of date); it lives as
+# a static copy in this repo under skills/baseten/ (installed above).
 install_skill_packages
 
 # Baseten CLI (https://github.com/basetenlabs/baseten-cli)
