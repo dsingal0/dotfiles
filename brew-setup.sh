@@ -162,7 +162,8 @@ baseten --version 2>/dev/null || baseten version 2>/dev/null || true
 ensure_venv
 
 # Install paseo CLI via pnpm (pre-release track via the `beta` dist-tag, latest npm from brew's node formula)
-pnpm add -g --allow-build=node-pty @getpaseo/cli@beta
+# --allow-build: native postinstall deps; without these, pnpm prompts interactively.
+pnpm add -g --allow-build=node-pty --allow-build=@parcel/watcher @getpaseo/cli@beta
 
 # Remove stale downloads and old versions
 brew cleanup --prune=all || echo "Warning: brew cleanup failed (continuing)"
