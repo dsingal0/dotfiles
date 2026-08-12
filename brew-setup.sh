@@ -18,9 +18,9 @@ brew trust basetenlabs/baseten 2>/dev/null || true
 # Packages to install and keep up to date
 # `node` provides npm, used below to install paseo.
 # `baseten` = basetenlabs/baseten-cli (https://github.com/basetenlabs/baseten-cli); `uv` for ~/venv + truss.
-FORMULAS=(baseten btop croc gh node mole rtk tmux uv)
+FORMULAS=(baseten btop croc gh node mole pnpm rtk tmux uv)
 # ghostty = terminal emulator. grok-build has no official curl installer, so it
-# stays a cask; droid / opencode install via npm below, cursor-cli via curl.
+# stays a cask; droid / opencode install via pnpm below, cursor-cli via curl.
 # font-jetbrains-mono-nerd-font = JetBrains Mono with Nerd Font glyphs for TUIs.
 CASKS=(brave-browser@beta ghostty font-jetbrains-mono-nerd-font)
 CASKS+=(grok-build)
@@ -30,29 +30,41 @@ for pkg in "${FORMULAS[@]}"; do
   brew install "$pkg" || echo "Warning: failed to install formula '$pkg' (continuing)"
 done
 
-# Coding harnesses: opencode and droid install via npm (latest), grok-build is
+# pnpm global binaries live in $PNPM_HOME/bin; ensure that dir is on PATH for
+# the pnpm-based installs below. (`pnpm bin -g` errors out when the dir isn't
+# already on PATH, so derive it from the platform default instead.)
+case "$(uname -s)" in
+  Darwin) PNPM_HOME="${PNPM_HOME:-$HOME/Library/pnpm}" ;;
+  *)      PNPM_HOME="${PNPM_HOME:-$HOME/.local/share/pnpm}" ;;
+esac
+export PNPM_HOME
+export PATH="$PNPM_HOME/bin:$PATH"
+
+# Uninstall the npm-managed copies of packages now handled by pnpm, so no
+# stale npm binaries linger on PATH.
+npm uninstall -g opencode-ai @opencode-ai/cli droid @getpaseo/cli 2>/dev/null || true
+
+# Coding harnesses: opencode and droid install via pnpm (latest), grok-build is
 # in the cask loop below and cursor-cli is further down.
-# opencode v2 (@opencode-ai/cli@next) replaces v1 (opencode-ai): uninstall any
-# leftover v1, then install/update v2. allow-scripts covers its trusted
-# postinstall binary selection.
-npm config set allow-scripts="droid,@opencode-ai/cli" --location=user
+# opencode v1 (opencode-ai) replaces v2 (@opencode-ai/cli@next): force uninstall
+# any leftover v2 from both npm and pnpm, then install/update v1 via pnpm.
 # Drop any opencode binary left by the old curl installer (~/.opencode/bin) so
-# the npm-managed binary is the one on PATH.
+# the pnpm-managed binary is the one on PATH.
 rm -f "$HOME/.opencode/bin/opencode" 2>/dev/null || true
 rmdir "$HOME/.opencode/bin" 2>/dev/null || true
-echo "Installing opencode (v2)..."
-npm uninstall -g opencode-ai || true
-npm install -g @opencode-ai/cli@next
-opencode2 --version 2>/dev/null || true
+echo "Installing opencode (v1)..."
+pnpm remove -g @opencode-ai/cli 2>/dev/null || true
+pnpm add -g opencode-ai
+opencode --version 2>/dev/null || true
 
 # Install/update Meta CLI.
 curl -fsSL https://dev.meta.ai/install.sh | bash
 
 # Drop the droid binary left by the old curl installer (~/.local/bin/droid) so
-# the npm-managed binary is the one on PATH.
+# the pnpm-managed binary is the one on PATH.
 rm -f "$HOME/.local/bin/droid" 2>/dev/null || true
 echo "Installing droid..."
-npm install -g droid
+pnpm add -g --allow-build=droid droid
 droid --version 2>/dev/null || true
 
 for pkg in "${CASKS[@]}"; do
@@ -124,7 +136,7 @@ echo "Installing cursor-cli..."
 curl -fsS https://cursor.com/install | bash
 cursor --version 2>/dev/null || true
 
-# droid is installed via npm above
+# droid is installed via pnpm above
 
 # Configure Factory: Baseten BYOK custom models (~/.factory/settings.json) and
 # FACTORY_API_KEY exported to shell rc files for the droid CLI.
@@ -147,8 +159,8 @@ baseten --version 2>/dev/null || baseten version 2>/dev/null || true
 # ~/venv with truss (Baseten model authoring / deploy-loop)
 ensure_venv
 
-# Install paseo CLI via npm (pre-release track via the `beta` dist-tag, latest npm from brew's node formula)
-npm install -g --allow-scripts=node-pty @getpaseo/cli@beta
+# Install paseo CLI via pnpm (pre-release track via the `beta` dist-tag, latest npm from brew's node formula)
+pnpm add -g --allow-build=node-pty @getpaseo/cli@beta
 
 # Remove stale downloads and old versions
 brew cleanup --prune=all || echo "Warning: brew cleanup failed (continuing)"

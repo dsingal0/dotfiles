@@ -15,8 +15,10 @@ append_once() {
 # directly. All of this is best-effort (tolerate missing apt / non-root / non-Debian).
 if command -v sudo >/dev/null 2>&1 && [[ "${EUID:-$(id -u)}" -ne 0 ]]; then
   ADO="sudo apt-get"
+  SUDO="sudo"
 else
   ADO="apt-get"
+  SUDO=""
 fi
 $ADO update -y || true
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -41,7 +43,7 @@ ln -sf "$SCRIPT_DIR/tmux.conf" "$HOME/.tmux.conf"
 # Reload config into running tmux server, if any
 tmux source-file "$HOME/.tmux.conf" 2>/dev/null || true
 
-# Link custom user scripts into ~/.local/bin (on PATH via the gh step below)
+# Link custom user scripts into ~/.local/bin (on PATH via the uv step below)
 mkdir -p "$HOME/.local/bin"
 ln -sf "$SCRIPT_DIR/bin/droid-export" "$HOME/.local/bin/droid-export"
 ln -sf "$SCRIPT_DIR/bin/devpod-bundle" "$HOME/.local/bin/devpod-bundle"
@@ -66,41 +68,61 @@ node -v # Should print "v26.2.0".
 # Verify npm version:
 npm -v # Should print "11.13.0".
 
-# npm postinstall allow-list for packages that need build/postinstall scripts:
-# droid and opencode v2 (@opencode-ai/cli, which selects the native binary via a
-# trusted postinstall script). opencode v1 (opencode-ai) is no longer installed.
-npm config set allow-scripts="droid,@opencode-ai/cli" --location=user
+# Install/update pnpm (npm's faster replacement; corepack is no longer bundled
+# with Node 25+, so bootstrap pnpm itself via npm).
+npm install -g pnpm
+# Ensure pnpm global binaries are on PATH for the rest of this script.
+# (`pnpm bin -g` errors out when the dir isn't already on PATH, so derive it
+# from the platform default instead.)
+case "$(uname -s)" in
+  Darwin) PNPM_HOME="${PNPM_HOME:-$HOME/Library/pnpm}" ;;
+  *)      PNPM_HOME="${PNPM_HOME:-$HOME/.local/share/pnpm}" ;;
+esac
+export PNPM_HOME
+export PATH="$PNPM_HOME/bin:$PATH"
+
+# Uninstall the npm-managed copies of packages now handled by pnpm, so no
+# stale npm binaries linger on PATH.
+npm uninstall -g opencode-ai @opencode-ai/cli droid @getpaseo/cli 2>/dev/null || true
 
 # Drop any opencode binary left by the old curl installer (~/.opencode/bin) so
-# the npm-managed binary is the one on PATH.
+# the pnpm-managed binary is the one on PATH.
 rm -f "$HOME/.opencode/bin/opencode" 2>/dev/null || true
 rmdir "$HOME/.opencode/bin" 2>/dev/null || true
 
-# Install/update opencode v2 (@opencode-ai/cli@next, which runs as `opencode2`).
-# The global bin is already on PATH via nvm.
-echo "Installing opencode (v2)..."
-npm uninstall -g opencode-ai || true
-npm install -g @opencode-ai/cli@next
-opencode2 --version || true
+# Install/update opencode v1 (opencode-ai) via pnpm. Force-uninstall v2
+# (@opencode-ai/cli) from both npm and pnpm so no stale binary lingers.
+echo "Installing opencode (v1)..."
+pnpm remove -g @opencode-ai/cli 2>/dev/null || true
+pnpm add -g opencode-ai
+opencode --version || true
 
 # Install/update Meta CLI.
 curl -fsSL https://dev.meta.ai/install.sh | bash
 
 configure_opencode_permission
 
-# Install droid (Factory CLI) via npm - the official curl installer lags the
-# npm release (it's pinned to an older version), so npm gets the latest.
+# Install droid (Factory CLI) via pnpm - the official curl installer lags the
+# npm release (it's pinned to an older version), so pnpm gets the latest.
 # Drop the droid binary left by the old curl installer (~/.local/bin/droid) so
-# the npm-managed binary is the one on PATH.
+# the pnpm-managed binary is the one on PATH.
 rm -f "$HOME/.local/bin/droid" 2>/dev/null || true
 echo "Installing droid..."
-npm install -g droid
+pnpm add -g --allow-build=droid droid
 
-# Install/update gh
+# Install/update gh from GitHub's official apt repo (replaces the webi.sh curl
+# pipe; gh has no official npm package).
 echo "Installing gh..."
-curl -sS https://webi.sh/gh | sh
+if ! command -v gh >/dev/null 2>&1; then
+  $SUDO mkdir -p -m 755 /etc/apt/keyrings
+  curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg | $SUDO tee /etc/apt/keyrings/githubcli-archive-keyring.gpg > /dev/null
+  $SUDO chmod go+r /etc/apt/keyrings/githubcli-archive-keyring.gpg
+  echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" | $SUDO tee /etc/apt/sources.list.d/github-cli.list > /dev/null
+  $ADO update -y
+  $ADO install -y gh
+fi
 
-# Add gh to PATH (idempotent)
+# Ensure ~/.local/bin is on PATH for future shells (custom scripts + uv/rtk/croc)
 append_once "$HOME/.bashrc" 'export PATH="$HOME/.local/bin:$PATH"'
 
 # Install/update uv
@@ -137,7 +159,7 @@ curl https://cursor.com/install -fsS | bash
 
 # Install/update paseo (pre-release track via the `beta` dist-tag)
 echo "Installing paseo..."
-npm install -g @getpaseo/cli@beta && paseo
+pnpm add -g --allow-build=node-pty @getpaseo/cli@beta && paseo
 
 # Install/update rtk (Rust Token Killer) - CLI proxy that cuts LLM token usage.
 # Single Rust binary in ~/.local/bin; ensure that dir is on PATH for this script

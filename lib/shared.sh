@@ -357,8 +357,8 @@ install_shared_skills() {
 install_skill_packages() {
   local include_emilkowalski="${1:-false}"
 
-  if ! command -v npx >/dev/null 2>&1; then
-    echo "WARNING: npx not found; skipping third-party skill packages."
+  if ! command -v pnpm >/dev/null 2>&1; then
+    echo "WARNING: pnpm not found; skipping third-party skill packages."
     return 0
   fi
 
@@ -387,7 +387,7 @@ install_skill_packages() {
   for pack in "${packs[@]}"; do
     echo "Installing skill pack: $pack (global)..."
     # --full-depth: mattpocock nests skills under engineering/productivity/etc.
-    npx --yes skills@latest add "$pack" -g -y --skill '*' --full-depth \
+    pnpm dlx skills@latest add "$pack" -g -y --skill '*' --full-depth \
       "${agent_args[@]}" \
       || echo "WARNING: skill pack install reported errors for $pack (continuing)."
   done
