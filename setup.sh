@@ -91,13 +91,15 @@ npm uninstall -g opencode-ai @opencode-ai/cli droid @getpaseo/cli 2>/dev/null ||
 rm -f "$HOME/.opencode/bin/opencode" 2>/dev/null || true
 rmdir "$HOME/.opencode/bin" 2>/dev/null || true
 
-# Install/update opencode v1 (opencode-ai) via pnpm. Force-uninstall v2
-# (@opencode-ai/cli) from both npm and pnpm so no stale binary lingers.
-echo "Installing opencode (v1)..."
-pnpm remove -g @opencode-ai/cli 2>/dev/null || true
-# --allow-build=opencode-ai: v1 fetches its native binary via a postinstall
-# script, which pnpm blocks by default.
-pnpm add -g --allow-build=opencode-ai opencode-ai
+# Uninstall opencode v1 (opencode-ai) so it cannot shadow v2 on PATH.
+echo "Uninstalling opencode (v1)..."
+pnpm remove -g opencode-ai 2>/dev/null || true
+
+# Install/update opencode v2 (@opencode-ai/cli@next). The package's postinstall
+# script selects the native binary; pnpm blocks that unless --allow-build is set.
+# See https://opencode.ai/v2/docs
+echo "Installing opencode (v2)..."
+pnpm add -g --allow-build=@opencode-ai/cli @opencode-ai/cli@next
 opencode --version || true
 
 # Install/update Meta CLI.

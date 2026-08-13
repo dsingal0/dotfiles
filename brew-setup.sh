@@ -46,17 +46,20 @@ npm uninstall -g opencode-ai @opencode-ai/cli droid @getpaseo/cli 2>/dev/null ||
 
 # Coding harnesses: opencode and droid install via pnpm (latest), grok-build is
 # in the cask loop below and cursor-cli is further down.
-# opencode v1 (opencode-ai) replaces v2 (@opencode-ai/cli@next): force uninstall
-# any leftover v2 from both npm and pnpm, then install/update v1 via pnpm.
 # Drop any opencode binary left by the old curl installer (~/.opencode/bin) so
 # the pnpm-managed binary is the one on PATH.
 rm -f "$HOME/.opencode/bin/opencode" 2>/dev/null || true
 rmdir "$HOME/.opencode/bin" 2>/dev/null || true
-echo "Installing opencode (v1)..."
-pnpm remove -g @opencode-ai/cli 2>/dev/null || true
-# --allow-build=opencode-ai: v1 fetches its native binary via a postinstall
-# script, which pnpm blocks by default.
-pnpm add -g --allow-build=opencode-ai opencode-ai
+
+# Uninstall opencode v1 (opencode-ai) so it cannot shadow v2 on PATH.
+echo "Uninstalling opencode (v1)..."
+pnpm remove -g opencode-ai 2>/dev/null || true
+
+# opencode v2 (@opencode-ai/cli@next): native binary is selected by a
+# postinstall script, which pnpm blocks unless --allow-build is set.
+# See https://opencode.ai/v2/docs
+echo "Installing opencode (v2)..."
+pnpm add -g --allow-build=@opencode-ai/cli @opencode-ai/cli@next
 opencode --version 2>/dev/null || true
 
 # Install/update Meta CLI.
