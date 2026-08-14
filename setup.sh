@@ -95,12 +95,7 @@ rmdir "$HOME/.opencode/bin" 2>/dev/null || true
 echo "Uninstalling opencode (v1)..."
 pnpm remove -g opencode-ai 2>/dev/null || true
 
-# Install/update opencode v2 (@opencode-ai/cli@next). The package's postinstall
-# script selects the native binary; pnpm blocks that unless --allow-build is set.
-# See https://opencode.ai/v2/docs
-echo "Installing opencode (v2)..."
-pnpm add -g --allow-build=@opencode-ai/cli @opencode-ai/cli@next
-opencode --version || true
+install_opencode_v2
 
 # Install/update Meta CLI.
 curl -fsSL https://dev.meta.ai/install.sh | bash

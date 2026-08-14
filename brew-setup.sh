@@ -30,6 +30,12 @@ for pkg in "${FORMULAS[@]}"; do
   brew install "$pkg" || echo "Warning: failed to install formula '$pkg' (continuing)"
 done
 
+# Source shared config helpers (opencode install + permission config, Baseten
+# BYOK models), deduplicated with setup.sh so both bootstrap scripts stay in
+# sync. Sourcing only defines functions, so it is safe to do this early.
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+. "$SCRIPT_DIR/lib/shared.sh"
+
 # pnpm global binaries live in $PNPM_HOME/bin; ensure that dir is on PATH for
 # the pnpm-based installs below. (`pnpm bin -g` errors out when the dir isn't
 # already on PATH, so derive it from the platform default instead.)
@@ -55,12 +61,7 @@ rmdir "$HOME/.opencode/bin" 2>/dev/null || true
 echo "Uninstalling opencode (v1)..."
 pnpm remove -g opencode-ai 2>/dev/null || true
 
-# opencode v2 (@opencode-ai/cli@next): native binary is selected by a
-# postinstall script, which pnpm blocks unless --allow-build is set.
-# See https://opencode.ai/v2/docs
-echo "Installing opencode (v2)..."
-pnpm add -g --allow-build=@opencode-ai/cli @opencode-ai/cli@next
-opencode --version 2>/dev/null || true
+install_opencode_v2
 
 # Install/update Meta CLI.
 curl -fsSL https://dev.meta.ai/install.sh | bash
@@ -83,7 +84,6 @@ yes | brew upgrade || echo "Warning: brew upgrade failed (continuing)"
 yes | brew upgrade --greedy || echo "Warning: brew upgrade --greedy failed (continuing)"
 
 # Symlink tmux config (enables mouse scroll passthrough for Droid in tmux)
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ln -sf "$SCRIPT_DIR/tmux.conf" "$HOME/.tmux.conf"
 
 # Symlink Ghostty config (terminal font + SSH shell integration)
@@ -95,10 +95,6 @@ mkdir -p "$HOME/.local/bin"
 rm -f "$HOME/.local/bin/droid-export"
 ln -sf "$SCRIPT_DIR/bin/devpod-bundle" "$HOME/.local/bin/devpod-bundle"
 export PATH="$HOME/.local/bin:$PATH"
-
-# Source shared config helpers (opencode permission + Baseten BYOK models),
-# deduplicated with setup.sh so both bootstrap scripts stay in sync.
-. "$SCRIPT_DIR/lib/shared.sh"
 
 ensure_pnpm_shell_path
 
