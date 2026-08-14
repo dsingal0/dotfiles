@@ -47,6 +47,13 @@ install_opencode_v2() {
   pnpm add -g --allow-build=@opencode-ai/cli @opencode-ai/cli@next || true
 
   local attempt pkg_dir
+  # pnpm may skip postinstall when reusing a store copy that still has the
+  # tarball stub; run it once up front so setup does not depend on pnpm
+  # re-invoking the script on a cache hit.
+  if pkg_dir="$(opencode_v2_package_dir)"; then
+    ( cd "$pkg_dir" && node ./postinstall.mjs ) || true
+  fi
+
   for attempt in 1 2 3; do
     if opencode2 --version; then
       return 0
