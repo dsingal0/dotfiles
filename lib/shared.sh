@@ -94,6 +94,31 @@ with open(path, "w") as f:
 PYEOF
 }
 
+# Symlink the repo's global opencode instructions into
+# ~/.config/opencode/AGENTS.md so every project session picks up the same
+# global rules (no /tmp, lowercase names, worktrees above the repo, Docker
+# host networking). Idempotent: re-runs refresh the symlink.
+# Pass the repo root as $1.
+install_global_agents_md() {
+  local repo_dir="$1"
+  local src="$repo_dir/config/opencode/AGENTS.md"
+  local dest="$HOME/.config/opencode/AGENTS.md"
+
+  if [[ ! -f "$src" ]]; then
+    echo "NOTE: no global AGENTS.md at $src; skipping."
+    return 0
+  fi
+
+  mkdir -p "$(dirname "$dest")"
+  if [[ -e "$dest" && ! -L "$dest" ]]; then
+    # Preserve any hand-edited copy before taking over with the managed symlink.
+    mv -f "$dest" "$dest.bak"
+    echo "  backed up existing ~/.config/opencode/AGENTS.md -> AGENTS.md.bak"
+  fi
+  ln -sfn "$src" "$dest"
+  echo "Global opencode AGENTS.md installed: $dest -> $src"
+}
+
 # Configure Factory custom models (Baseten BYOK).
 #
 # Reads BASETEN_API_KEY from the environment (callers source .env first).

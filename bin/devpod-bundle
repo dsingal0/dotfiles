@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # devpod-bundle - pack auth + settings for SSH, opencode, factory droid,
-# cursor CLI, and grok CLI into a single tar.gz so they can be sent via croc
-# to a dev pod and unpacked into the right locations.
+# cursor CLI, grok CLI, and truss (Baseten) into a single tar.gz so they can
+# be sent via croc to a dev pod and unpacked into the right locations.
 #
 # Two modes:
 #
@@ -167,6 +167,10 @@ labels+=(
   "grok CLI settings"
 )
 
+# truss (Baseten) CLI
+abs_paths+=("$HOME_DIR/.trussrc")
+labels+=("truss CLI credentials (Baseten remotes)")
+
 if [ "${#abs_paths[@]}" -ne "${#labels[@]}" ]; then
   echo "internal error: abs_paths/labels length mismatch" >&2
   exit 1
@@ -241,6 +245,8 @@ trap 'rm -rf "$TMP_BUNDLE"' EXIT
   echo "  - opencode v2 auth IS bundled via ~/.local/share/opencode/auth.json."
   echo "    Its cli.json settings are bundled too; global opencode.json is"
   echo "    always bundled."
+  echo "  - truss (Baseten) credentials ARE bundled via ~/.trussrc. If the"
+  echo "    remote needs re-auth on the pod, run \`truss login\`."
 } > "$TMP_BUNDLE/RESTORE.txt"
 
 # Build the archive. Paths are stored relative to $HOME via -C "$HOME_DIR";

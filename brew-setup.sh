@@ -134,6 +134,10 @@ cp "$ALIASES_FILE" "$SCRIPT_DIR/baseten_aliases"
 # opencode itself is installed above, before the other coding harnesses.
 configure_opencode_permission
 
+# Install the repo's global opencode instructions (~/.config/opencode/AGENTS.md)
+# so every project session follows the same global rules.
+install_global_agents_md "$SCRIPT_DIR"
+
 # Install cursor-cli (Cursor agent) via official installer
 echo "Installing cursor-cli..."
 curl -fsS https://cursor.com/install | bash

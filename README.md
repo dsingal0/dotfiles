@@ -59,6 +59,10 @@ is skipped with a warning.
 ├── lib/
 │   └── shared.sh      # sourced by both bootstrap scripts: opencode permission
 │                       #   + Baseten BYOK Factory custom-models config
+├── config/
+│   └── opencode/
+│       └── AGENTS.md  # global opencode instructions symlinked to
+│                       #   ~/.config/opencode/AGENTS.md
 ├── tmux.conf          # tmux config symlinked to ~/.tmux.conf
 ├── bin/
 │   ├── droid-export   # export a Factory "droid" session to JSONL / markdown
@@ -79,6 +83,9 @@ is skipped with a warning.
 - **opencode** - installed FIRST among the coding harnesses (official curl
   installer; npm fallback on Linux), with `permission: allow` merged into
   `~/.config/opencode/opencode.json`
+- **global opencode instructions** - `config/opencode/AGENTS.md` symlinked to
+  `~/.config/opencode/AGENTS.md` (no `/tmp`, lowercase names, worktrees above
+  the repo, Docker host networking)
 - **droid** (Factory CLI; official curl installer, npm fallback on Linux)
 - **Factory custom models** - Baseten BYOK entries written to
   `~/.factory/settings.json` (requires `BASETEN_API_KEY`)
@@ -165,9 +172,9 @@ input), `tool_result`. System-reminder noise blocks are dropped.
 
 ## devpod-bundle (`bin/devpod-bundle`)
 
-Pack the auth + settings for SSH, opencode, Factory droid, Cursor CLI, and
-grok CLI into one tar.gz, croc it to a dev pod, and restore it there -
-so you only stay logged in on one machine (your Mac).
+Pack the auth + settings for SSH, opencode, Factory droid, Cursor CLI,
+grok CLI, and truss (Baseten) into one tar.gz, croc it to a dev pod, and
+restore it there - so you only stay logged in on one machine (your Mac).
 
 Paths in the archive are relative to `$HOME`, so restore works on any pod
 regardless of username. Cursor CLI auth uses an API key (`CURSOR_API_KEY`)
@@ -175,7 +182,9 @@ stored in `~/.cursor/env` (mode 600, not in this repo), which IS bundled; shell
 rc files source it via a managed block added by `setup.sh` / `brew-setup.sh`
 (`configure_cursor` in `lib/shared.sh`). The factory mTLS cert
 (`~/.factory/cache/certs/factory-cli-certs.pem`) is bundled; re-run
-`factory login` on the pod if it has expired.
+`factory login` on the pod if it has expired. Truss (Baseten) credentials
+(`~/.trussrc`) are bundled too; re-run `truss login` on the pod if a remote
+needs re-auth.
 
 ```bash
 # On the Mac (the machine you stay logged in on):

@@ -102,6 +102,10 @@ curl -fsSL https://dev.meta.ai/install.sh | bash
 
 configure_opencode_permission
 
+# Install the repo's global opencode instructions (~/.config/opencode/AGENTS.md)
+# so every project session follows the same global rules.
+install_global_agents_md "$SCRIPT_DIR"
+
 # Install droid (Factory CLI) via pnpm - the official curl installer lags the
 # npm release (it's pinned to an older version), so pnpm gets the latest.
 # Drop the droid binary left by the old curl installer (~/.local/bin/droid) so
