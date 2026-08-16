@@ -162,10 +162,11 @@ cleanup_stale_baseten_skill
 # Install personal skills into every harness (droid / opencode / cursor / grok)
 install_shared_skills "$SCRIPT_DIR"
 
-# Third-party skill packs (mattpocock + emilkowalski) for all agents. The baseten
-# skill is no longer pulled from basetenlabs/baseten-skills (out of date); it
-# lives as a static copy in this repo under skills/baseten/ (installed above).
-install_skill_packages true
+# Third-party skill packs (mattpocock + expo + emilkowalski) for all agents. The
+# baseten skill is no longer pulled from basetenlabs/baseten-skills (out of
+# date); it lives as a static copy in this repo under skills/baseten/ (installed
+# above).
+install_skill_packages true true
 
 # baseten CLI is installed via the FORMULAS brew loop above; ensure version prints
 baseten --version 2>/dev/null || baseten version 2>/dev/null || true

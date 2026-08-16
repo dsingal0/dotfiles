@@ -421,9 +421,12 @@ PYEOF
 # Existing non-symlink directories are left alone (with a warning) so vendor
 # or hand-installed skills are not clobbered.
 # Pass the repo root as $1. Optionally pass "false" as $2 to skip grok.
+# Pass a space-separated list of skill names as $3 to skip them (e.g. design
+# skills that only brew-setup.sh installs).
 install_shared_skills() {
   local repo_dir="$1"
   local include_grok="${2:-true}"
+  local exclude_names="${3:-}"
   local skills_src="$repo_dir/skills"
 
   if [[ ! -d "$skills_src" ]]; then
@@ -455,6 +458,20 @@ install_shared_skills() {
     [[ -f "$skill_dir/SKILL.md" ]] || continue
     name="$(basename "$skill_dir")"
 
+    if [[ -n "$exclude_names" && " $exclude_names " == *" $name "* ]]; then
+      for target in "${targets[@]}"; do
+        dest="$target/$name"
+        if [[ -L "$dest" ]]; then
+          rm -f "$dest"
+          echo "  removed excluded skill: $dest"
+        elif [[ -e "$dest" ]]; then
+          echo "  WARNING: $dest exists and is not a symlink; leaving it alone."
+        fi
+      done
+      echo "  skipped $name (excluded)"
+      continue
+    fi
+
     for target in "${targets[@]}"; do
       dest="$target/$name"
       if [[ -e "$dest" && ! -L "$dest" ]]; then
@@ -470,13 +487,63 @@ install_shared_skills() {
   echo "Shared skills installed: $count skill(s) -> $harness_names."
 }
 
+# Remove third-party skills from packs this machine should not have (e.g.
+# expo/eas and design skills on Linux dev pods). Skill names are read from the
+# skills CLI's global lock file (~/.agents/.skill-lock.json), which records the
+# source repo for each installed skill, so removal is exact even when two packs
+# ship a skill with the same name (e.g. `prototype` in both mattpocock and
+# emilkowalski). Removal goes through `skills remove` so the lock file and the
+# ~/.agents/skills canonical store stay consistent.
+#
+# Pass the pack sources to remove as $@ (e.g. "expo/skills" "emilkowalski/skills").
+# Idempotent: missing skills are a no-op.
+cleanup_excluded_skill_packs() {
+  local sources=("$@")
+  [[ ${#sources[@]} -gt 0 ]] || return 0
+
+  local lock="$HOME/.agents/.skill-lock.json"
+  [[ -f "$lock" ]] || return 0
+
+  local -a names=()
+  local n
+  while IFS= read -r n; do
+    [[ -n "$n" ]] && names+=("$n")
+  done < <(python3 - "$lock" "${sources[@]}" << 'PYEOF'
+import json, sys
+lock_path = sys.argv[1]
+sources = set(sys.argv[2:])
+try:
+    with open(lock_path) as f:
+        data = json.load(f)
+except (FileNotFoundError, json.JSONDecodeError):
+    sys.exit(0)
+for name in sorted(data.get("skills", {})):
+    if data["skills"][name].get("source") in sources:
+        print(name)
+PYEOF
+)
+
+  if [[ ${#names[@]} -eq 0 ]]; then
+    echo "  no excluded pack skills installed; nothing to remove."
+    return 0
+  fi
+
+  echo "Removing excluded pack skills: ${names[*]}"
+  # NOTE: skill names must precede the -a flags; the skills CLI's remove parser
+  # greedily consumes every non-flag arg after -a as an agent name.
+  pnpm dlx skills@latest remove -g -y \
+    "${names[@]}" \
+    -a universal -a droid -a opencode -a cursor \
+    || echo "WARNING: skill removal reported errors (continuing)."
+}
+
 # Install third-party skill packs globally via the skills.sh CLI (npx skills).
 # Idempotent: re-runs refresh to latest from each source.
 #
 # Packs:
 #   https://github.com/mattpocock/skills
-#   https://github.com/expo/skills
-#   https://github.com/emilkowalski/skills  (opt-in, see $1)
+#   https://github.com/expo/skills            (opt-in, see $2)
+#   https://github.com/emilkowalski/skills    (opt-in, see $1)
 #
 # The baseten skill used to come from https://github.com/basetenlabs/baseten-skills
 # but that pack is out of date and token-inefficient. It now lives as a static,
@@ -490,20 +557,34 @@ install_shared_skills() {
 #
 # Pass "true" as $1 to also install the emilkowalski/skills pack
 # (brew-setup.sh on macOS); setup.sh (Linux dev pods) skips it.
+# Pass "false" as $2 to skip the expo/skills pack (Expo + EAS skills);
+# setup.sh skips it, brew-setup.sh keeps it (default true).
 #
 # Requires node/npx (installed earlier by both bootstrap scripts).
 install_skill_packages() {
   local include_emilkowalski="${1:-false}"
+  local include_expo="${2:-true}"
 
   if ! command -v pnpm >/dev/null 2>&1; then
     echo "WARNING: pnpm not found; skipping third-party skill packages."
     return 0
   fi
 
+  # Remove skills from packs this machine should not have (e.g. expo/eas and
+  # design skills on Linux dev pods) before installing the included packs.
+  local -a excluded_sources=()
+  [[ "$include_expo" == "true" ]] || excluded_sources+=("expo/skills")
+  [[ "$include_emilkowalski" == "true" ]] || excluded_sources+=("emilkowalski/skills")
+  if [[ ${#excluded_sources[@]} -gt 0 ]]; then
+    cleanup_excluded_skill_packs "${excluded_sources[@]}"
+  fi
+
   local packs=(
     "mattpocock/skills"
-    "expo/skills"
   )
+  if [[ "$include_expo" == "true" ]]; then
+    packs+=("expo/skills")
+  fi
   if [[ "$include_emilkowalski" == "true" ]]; then
     packs+=("emilkowalski/skills")
   fi

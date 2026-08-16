@@ -209,13 +209,16 @@ configure_cursor
 # its place by install_shared_skills below.
 cleanup_stale_baseten_skill
 
-# Install personal skills into every harness (droid / opencode / cursor)
-install_shared_skills "$SCRIPT_DIR" false
+# Install personal skills into every harness (droid / opencode / cursor).
+# Design skills (frontend-design) are skipped here and installed only by
+# brew-setup.sh (macOS).
+install_shared_skills "$SCRIPT_DIR" false "frontend-design"
 
-# Third-party skill packs (mattpocock + expo) for all agents. The baseten skill
-# is no longer pulled from basetenlabs/baseten-skills (out of date); it lives as
-# a static copy in this repo under skills/baseten/ (installed above).
-install_skill_packages
+# Third-party skill packs for all agents. Expo/EAS and design packs are skipped
+# here (Linux dev pods) and installed only by brew-setup.sh (macOS). The baseten
+# skill is no longer pulled from basetenlabs/baseten-skills (out of date); it
+# lives as a static copy in this repo under skills/baseten/ (installed above).
+install_skill_packages false false
 
 # Baseten CLI (https://github.com/basetenlabs/baseten-cli)
 # Homebrew if available, else GitHub release -> ~/.local/bin
