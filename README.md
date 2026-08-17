@@ -3,9 +3,10 @@
 Personal dotfiles and bootstrap scripts for spinning up a new dev machine,
 remote dev pod, or any fresh box with the same tools and config as this one.
 
-Two platform bootstrap scripts share a common config layer in `lib/shared.sh`:
+Three platform bootstrap scripts share a common config layer in `lib/shared.sh`:
 
 - **`setup.sh`** - Linux / apt-based dev pods.
+- **`setup-arch.sh`** - Arch Linux (pacman + paru/AUR).
 - **`brew-setup.sh`** - macOS (Homebrew).
 
 Both are idempotent: re-run them to install or update tools on an existing
@@ -19,6 +20,9 @@ cd ~/dotfiles
 
 # Linux (apt-based):
 ./setup.sh
+
+# Arch Linux (pacman + paru/AUR):
+./setup-arch.sh
 
 # macOS (Homebrew):
 ./brew-setup.sh
@@ -55,6 +59,7 @@ is skipped with a warning.
 ```
 .
 ├── setup.sh           # Linux bootstrap (apt, nvm, rust, droid, rtk, ...)
+├── setup-arch.sh      # Arch Linux bootstrap (pacman + paru/AUR, same toolchain)
 ├── brew-setup.sh      # macOS bootstrap (Homebrew formulae + casks)
 ├── lib/
 │   └── shared.sh      # sourced by both bootstrap scripts: opencode permission
@@ -111,6 +116,18 @@ is skipped with a warning.
 - **paseo** (`@getpaseo/cli@beta`)
 - git identity (name + email) configured globally
 - `bin/droid-export` and `bin/devpod-bundle` symlinked into `~/.local/bin`
+
+### Arch Linux (`setup-arch.sh`)
+
+Same toolchain as `setup.sh`, with system packages from pacman / AUR instead of
+apt:
+
+- **base-devel**, git, **btop**, clang, tree, libevent, ncurses, bison,
+  **tmux**, **gh** (as `github-cli`), **croc**, **uv** (best-effort via pacman)
+- **paru** (AUR helper, built from the AUR if missing)
+- **rtk** (via AUR `rtk-bin`, falling back to the official curl installer)
+- everything else (nvm + Node.js 26, pnpm, droid, opencode, paseo, Rust/Cargo,
+  Cursor CLI, skills, Baseten CLI, truss venv) installs exactly as in `setup.sh`
 
 ### macOS (`brew-setup.sh`)
 
