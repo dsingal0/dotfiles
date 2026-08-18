@@ -10,98 +10,31 @@
 # the Factory Baseten BYOK custom-models config previously inlined in both
 # bootstrap scripts.
 
-# Resolve PNPM_HOME the same way setup.sh and ensure_pnpm_shell_path do.
-_opencode_v2_pnpm_home() {
-  case "$(uname -s)" in
-    Darwin) printf '%s\n' "${PNPM_HOME:-$HOME/Library/pnpm}" ;;
-    *)      printf '%s\n' "${PNPM_HOME:-$HOME/.local/share/pnpm}" ;;
-  esac
-}
-
-# Print the install directory of the @opencode-ai/cli package, or fail if it
-# can't be found. Prefer the pnpm shim's `# cmd-shim-target=` comment; fall
-# back to scanning $PNPM_HOME/global when the shim is missing or not on PATH yet.
-opencode_v2_package_dir() {
-  local shim target dir pnpm_home
-  shim="$(command -v opencode2 2>/dev/null)"
-  if [[ -n "$shim" && -f "$shim" ]]; then
-    target="$(sed -n 's/^# cmd-shim-target=//p' "$shim" | tail -1)"
-    if [[ -n "$target" ]]; then
-      dir="$(dirname "$(dirname "$target")")"
-      if [[ -f "$dir/postinstall.mjs" ]]; then
-        printf '%s\n' "$dir"
-        return 0
-      fi
-    fi
-  fi
-
-  pnpm_home="$(_opencode_v2_pnpm_home)"
-  dir="$(find -L "$pnpm_home/global" -path '*/node_modules/@opencode-ai/cli/postinstall.mjs' -print -quit 2>/dev/null \
-    | sed 's|/postinstall\.mjs$||')"
-  [[ -n "$dir" && -f "$dir/postinstall.mjs" ]] || return 1
-  printf '%s\n' "$dir"
-}
-
-# Materialize the real platform binary; the published tarball ships a stub until
-# this script runs.
-run_opencode_v2_postinstall() {
-  local pkg_dir="$1"
-  if ( cd "$pkg_dir" && node ./postinstall.mjs ); then
-    return 0
-  fi
-  echo "Warning: @opencode-ai/cli postinstall failed in $pkg_dir" >&2
-  return 1
-}
-
-# Install/update opencode v2 (@opencode-ai/cli@next) via pnpm.
+# Install/update opencode v2 (@opencode-ai/cli@next) via npm.
 # See https://opencode.ai/v2/docs. Note the binary is named opencode2, not opencode.
 #
-# The tarball ships a stub at bin/opencode2.exe that only prints "postinstall
-# script was not run" and exits 1; the package's postinstall replaces that stub
-# with the real platform binary. Three things make that fragile:
-#   - pnpm skips postinstall scripts unless the package is in --allow-build;
-#   - under pnpm's isolated node_modules the platform package
-#     (@opencode-ai/cli-<os>-<arch>) is not resolvable from the cli package, so
-#     the postinstall always falls back to re-fetching it with npm, and that
-#     network hop can fail;
-#   - the package directory is a symlink into pnpm's content-addressable store,
-#     and pnpm skips the postinstall whenever it reuses that store copy. So a
-#     stub left there by a failed run is sticky: re-running `pnpm add` will not
-#     fix it (and `--force` refetches every platform's ~170MB binary).
-# Hence: verify the binary actually runs rather than trusting pnpm's exit code,
-# and heal a stub by invoking the postinstall against the store copy directly.
-#
-# Requires $PNPM_HOME/bin on PATH (callers export it before calling).
+# npm is used instead of pnpm because pnpm skips postinstall scripts when it
+# reuses a cached copy from its content-addressable store. The tarball ships a
+# stub at bin/opencode2.exe ("postinstall script was not run" / exit 1), and the
+# package's postinstall replaces that stub with the real platform binary. npm
+# always runs postinstall, so this entire class of pnpm store-cache bugs goes away.
 install_opencode_v2() {
   echo "Installing opencode (v2)..."
-  pnpm add -g --allow-build=@opencode-ai/cli @opencode-ai/cli@next || true
 
-  local attempt pkg_dir
-  # pnpm may skip postinstall when reusing a store copy that still has the
-  # tarball stub; always invoke postinstall ourselves so setup does not depend
-  # on pnpm re-running the script on a cache hit.
-  if pkg_dir="$(opencode_v2_package_dir)"; then
-    run_opencode_v2_postinstall "$pkg_dir" || true
-  else
-    echo "Warning: @opencode-ai/cli install dir not found after pnpm add; will retry" >&2
-  fi
+  # Remove any stale pnpm-managed copy so the npm binary is the one on PATH.
+  pnpm remove -g @opencode-ai/cli 2>/dev/null || true
 
+  local attempt
   for attempt in 1 2 3; do
-    if opencode2 --version; then
+    npm install -g @opencode-ai/cli@next
+    if opencode2 --version 2>/dev/null; then
       return 0
     fi
-    if ! pkg_dir="$(opencode_v2_package_dir)"; then
-      echo "Warning: opencode2 is broken and its install dir was not found (attempt $attempt/3)" >&2
-      sleep 2
-      continue
-    fi
-    echo "Warning: opencode2 is not runnable (attempt $attempt/3); re-running its postinstall..." >&2
-    # On failure, pause before retrying: the postinstall's fetch is the likely
-    # culprit and an instant retry would hit the same transient error.
-    run_opencode_v2_postinstall "$pkg_dir" || sleep 2
+    echo "Warning: opencode2 is not runnable (attempt $attempt/3); retrying..." >&2
+    sleep 2
   done
   echo "Warning: opencode2 is still not runnable after 3 attempts (continuing)" >&2
-  echo "  Fix manually: pkg_dir=\$(find -L \"\$PNPM_HOME/global\" -path '*/@opencode-ai/cli/postinstall.mjs' | head -1 | sed 's|/postinstall.mjs||'); (cd \"\$pkg_dir\" && node ./postinstall.mjs)" >&2
+  echo "  Fix manually: npm install -g @opencode-ai/cli@next" >&2
   return 0
 }
 

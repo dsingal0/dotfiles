@@ -133,10 +133,12 @@ install_global_agents_md "$SCRIPT_DIR"
 # Install droid (Factory CLI) via pnpm - the official curl installer lags the
 # npm release (it's pinned to an older version), so pnpm gets the latest.
 # Drop the droid binary left by the old curl installer (~/.local/bin/droid) so
-# the pnpm-managed binary is the one on PATH.
+# the npm-managed binary is the one on PATH. Also remove any stale pnpm-managed
+# copy (npm always runs postinstall scripts, avoiding pnpm store-cache issues).
 rm -f "$HOME/.local/bin/droid" 2>/dev/null || true
+pnpm remove -g droid 2>/dev/null || true
 echo "Installing droid..."
-pnpm add -g --allow-build=droid droid
+npm install -g droid
 
 # gh (GitHub CLI) is installed via pacman above (official `github-cli` package,
 # which provides the `gh` binary) - no apt repo / keyring setup needed on Arch.
@@ -173,9 +175,8 @@ curl https://cursor.com/install -fsS | bash
 
 # Install/update paseo (pre-release track via the `beta` dist-tag)
 echo "Installing paseo..."
-# --allow-build: paseo pulls in native postinstall deps (node-pty, @parcel/watcher);
-# without these, pnpm prompts interactively to approve builds.
-pnpm add -g --allow-build=node-pty --allow-build=@parcel/watcher @getpaseo/cli@beta
+pnpm remove -g @getpaseo/cli 2>/dev/null || true
+npm install -g @getpaseo/cli@beta
 # Bare `paseo` runs onboard and prompts for relay pairing + voice on a TTY.
 # --no-relay skips device pairing; --voice disable skips voice model downloads.
 paseo onboard --no-relay --voice disable

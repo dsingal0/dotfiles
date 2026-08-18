@@ -67,10 +67,12 @@ install_opencode_v2
 curl -fsSL https://dev.meta.ai/install.sh | bash
 
 # Drop the droid binary left by the old curl installer (~/.local/bin/droid) so
-# the pnpm-managed binary is the one on PATH.
+# the npm-managed binary is the one on PATH. Also remove any stale pnpm-managed
+# copy (npm always runs postinstall scripts, avoiding pnpm store-cache issues).
 rm -f "$HOME/.local/bin/droid" 2>/dev/null || true
+pnpm remove -g droid 2>/dev/null || true
 echo "Installing droid..."
-pnpm add -g --allow-build=droid droid
+npm install -g droid
 droid --version 2>/dev/null || true
 
 for pkg in "${CASKS[@]}"; do
@@ -174,9 +176,10 @@ baseten --version 2>/dev/null || baseten version 2>/dev/null || true
 # ~/venv with truss (Baseten model authoring / deploy-loop)
 ensure_venv
 
-# Install paseo CLI via pnpm (pre-release track via the `beta` dist-tag, latest npm from brew's node formula)
-# --allow-build: native postinstall deps; without these, pnpm prompts interactively.
-pnpm add -g --allow-build=node-pty --allow-build=@parcel/watcher @getpaseo/cli@beta
+# Install paseo CLI via npm (pre-release track via the `beta` dist-tag).
+# npm is used instead of pnpm because npm always runs postinstall scripts.
+pnpm remove -g @getpaseo/cli 2>/dev/null || true
+npm install -g @getpaseo/cli@beta
 
 # Remove stale downloads and old versions
 brew cleanup --prune=all || echo "Warning: brew cleanup failed (continuing)"
