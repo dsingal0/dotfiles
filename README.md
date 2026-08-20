@@ -97,8 +97,10 @@ is skipped with a warning.
 - **FACTORY_API_KEY** - persisted to shell rc files so the `droid` CLI reads it
   from the environment (alternative to OAuth; requires `FACTORY_API_KEY`)
 - **CURSOR_API_KEY** - `~/.cursor/env` (mode 600, not in this repo) sourced by
-  shell rc files via a managed block so the Cursor CLI `agent` uses API-key
-  auth; the key file is carried to dev pods by `devpod-bundle`
+  shell rc files; legacy (the current `cursor-agent` binary does not read it).
+  Real cursor auth is file-based via `AGENT_CLI_CREDENTIAL_STORE=file`
+  (`~/.cursor/auth.json` on macOS, `~/.config/cursor/auth.json` on Linux),
+  carried to dev pods by `devpod-bundle`
 - tmux config symlinked to `~/.tmux.conf`
 - **~/venv** (via `uv`) with **truss** (Baseten model authoring / deploy-loop)
 - **croc** (file transfer, replaces magic-wormhole) - brew formula on macOS,
@@ -194,14 +196,33 @@ grok CLI, and truss (Baseten) into one tar.gz, croc it to a dev pod, and
 restore it there - so you only stay logged in on one machine (your Mac).
 
 Paths in the archive are relative to `$HOME`, so restore works on any pod
-regardless of username. Cursor CLI auth uses an API key (`CURSOR_API_KEY`)
-stored in `~/.cursor/env` (mode 600, not in this repo), which IS bundled; shell
-rc files source it via a managed block added by `setup.sh` / `brew-setup.sh`
-(`configure_cursor` in `lib/shared.sh`). The factory mTLS cert
+regardless of username.
+
+**Cursor CLI** auth is file-based: set `AGENT_CLI_CREDENTIAL_STORE=file` so
+`cursor-agent` writes `~/.cursor/auth.json` on macOS (and reads
+`~/.config/cursor/auth.json` on Linux) instead of the macOS Keychain. That file
+IS bundled; on restore it is copied to `~/.config/cursor/auth.json` on Linux.
+`~/.cursor/env` (`CURSOR_API_KEY`) is also bundled and sourced by shell rc, but
+it is legacy — the current `cursor-agent` binary does not read `CURSOR_API_KEY`.
+
+**Factory droid** auth is file-based too: set `FACTORY_DISABLE_KEYRING=1` so
+droid writes the portable `~/.factory/auth.v2.file` + `auth.v2.key` pair instead
+of the macOS login keychain (`auth.v2.loginkeychain`, which is NOT portable to
+Linux). The `auth.v2.file`/`auth.v2.key` pair IS bundled. The factory mTLS cert
 (`~/.factory/cache/certs/factory-cli-certs.pem`) is bundled; re-run
 `factory login` on the pod if it has expired. Truss (Baseten) credentials
 (`~/.trussrc`) are bundled too; re-run `truss login` on the pod if a remote
 needs re-auth.
+
+> **One-time migration on the Mac** (to get out of the keychain): in a new shell
+> (after setup has exported the env vars) re-login so the portable files are
+> written:
+> ```bash
+> AGENT_CLI_CREDENTIAL_STORE=file agent auth login   # writes ~/.cursor/auth.json
+> FACTORY_DISABLE_KEYRING=1 droid login              # writes ~/.factory/auth.v2.file + auth.v2.key
+> ```
+> After that, `devpod-bundle --list` should show both files as bundled (not
+> "missing").
 
 ```bash
 # On the Mac (the machine you stay logged in on):

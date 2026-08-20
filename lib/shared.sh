@@ -315,11 +315,15 @@ PYEOF
 #   2. write Baseten BYOK custom models into ~/.factory/settings.json
 #   3. persist FACTORY_API_KEY to shell rc files so the droid CLI can read it
 #      from the environment in new (and re-sourced) shells.
+#   4. persist FACTORY_DISABLE_KEYRING=1 so droid stores auth in the portable
+#      ~/.factory/auth.v2.file + auth.v2.key pair instead of the macOS login
+#      keychain — this is what lets `devpod-bundle` carry droid auth to Linux.
 # Pass the repo root as $1.
 configure_factory() {
   local repo_dir="$1"
   load_env_file "$repo_dir"
   configure_factory_models
+  persist_export_to_rc "FACTORY_DISABLE_KEYRING" "1"
   if [[ -n "${FACTORY_API_KEY:-}" ]]; then
     persist_export_to_rc "FACTORY_API_KEY" "$FACTORY_API_KEY"
     echo "FACTORY_API_KEY persisted to shell rc files."
@@ -331,11 +335,19 @@ configure_factory() {
   fi
 }
 
-# Source ~/.cursor/env (CURSOR_API_KEY for the Cursor CLI `agent`) into shell
-# rc files via a managed block so new shells pick up the API key. The key file
-# itself is NOT stored in this repo; it lives at ~/.cursor/env (mode 600) and
-# is carried to dev pods by `devpod-bundle`. Idempotent.
+# Configure the Cursor CLI (`agent`) for portable, file-based auth:
+#   1. Persist AGENT_CLI_CREDENTIAL_STORE=file to shell rc files so cursor-agent
+#      writes ~/.cursor/auth.json (macOS) / ~/.config/cursor/auth.json (Linux)
+#      instead of the macOS Keychain — this is what makes `devpod-bundle` able to
+#      carry the auth to Linux pods.
+#   2. On Linux, copy ~/.cursor/auth.json -> ~/.config/cursor/auth.json (the path
+#      cursor-agent reads there), so a bundle restored to ~/.cursor/auth.json works.
+#   3. Keep sourcing ~/.cursor/env (CURSOR_API_KEY) for compatibility (legacy;
+#      the current cursor-agent binary does not read CURSOR_API_KEY).
+# Idempotent.
 configure_cursor() {
+  persist_export_to_rc "AGENT_CLI_CREDENTIAL_STORE" "file"
+
   local rc_files=( "$HOME/.bashrc" )
   [[ -f "$HOME/.zshrc" ]] && rc_files+=( "$HOME/.zshrc" )
   local source_line='[ -f "$HOME/.cursor/env" ] && . "$HOME/.cursor/env"'
@@ -364,6 +376,16 @@ with open(path, "w") as f:
     f.write(content)
 PYEOF
   done
+
+  # Linux: cursor-agent reads ~/.config/cursor/auth.json; a restored bundle puts
+  # the file at ~/.cursor/auth.json, so bridge the two.
+  if [[ "$(uname -s)" != "Darwin" && -f "$HOME/.cursor/auth.json" ]]; then
+    mkdir -p "$HOME/.config/cursor"
+    cp -f "$HOME/.cursor/auth.json" "$HOME/.config/cursor/auth.json"
+    chmod 600 "$HOME/.config/cursor/auth.json"
+    echo "Cursor CLI: copied ~/.cursor/auth.json -> ~/.config/cursor/auth.json (Linux path)."
+  fi
+
   if [[ -f "$HOME/.cursor/env" ]]; then
     echo "Cursor CLI: ~/.cursor/env present; new shells will export CURSOR_API_KEY."
   else

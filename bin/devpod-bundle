@@ -25,10 +25,16 @@
 # settings live in ~/.config/opencode/cli.json; global opencode.json is bundled
 # too. Only v2 is installed now; the v1 (opencode-ai) cases are gone.
 #
-# Cursor CLI auth uses an API key (CURSOR_API_KEY) stored in ~/.cursor/env
-# (mode 600, outside this repo). That file IS bundled, so it travels Mac ->
-# pod via the archive; shell rc files source it via a managed block added by
-# setup.sh / brew-setup.sh. Browser/keychain tokens are not bundled.
+# Cursor CLI (cursor-agent) auth is file-based: set AGENT_CLI_CREDENTIAL_STORE=file
+# so it writes ~/.cursor/auth.json on macOS (and reads ~/.config/cursor/auth.json
+# on Linux) instead of the macOS Keychain. That auth.json IS bundled; on restore
+# it is copied to ~/.config/cursor/auth.json on Linux. ~/.cursor/env (CURSOR_API_KEY)
+# is also bundled and sourced by shell rc (legacy, kept for compatibility).
+#
+# factory droid auth is file-based too: set FACTORY_DISABLE_KEYRING=1 so droid
+# writes the portable ~/.factory/auth.v2.file + auth.v2.key pair instead of the
+# macOS login keychain (auth.v2.loginkeychain, which is NOT portable to Linux).
+# The auth.v2.file/key pair IS bundled.
 #
 # The output file is mode 600 (it contains secrets). Re-run anytime; each
 # bundle produces a new timestamped archive and leaves old ones in place.
@@ -88,6 +94,17 @@ if [ -n "$RESTORE_FILE" ]; then
   echo "Extracting into $HOME_DIR ..."
   # Skip the embedded RESTORE.txt note so it doesn't litter ~; print it below.
   tar -xzf "$RESTORE_FILE" -C "$HOME_DIR" --exclude=RESTORE.txt
+
+  # cursor-agent reads its file-store auth at ~/.cursor/auth.json on macOS but
+  # ~/.config/cursor/auth.json on Linux. The bundle stores it as .cursor/auth.json;
+  # on a Linux pod, place it where the CLI actually looks for it.
+  if [[ "$(uname -s)" != "Darwin" && -f "$HOME_DIR/.cursor/auth.json" ]]; then
+    mkdir -p "$HOME_DIR/.config/cursor"
+    cp -f "$HOME_DIR/.cursor/auth.json" "$HOME_DIR/.config/cursor/auth.json"
+    chmod 600 "$HOME_DIR/.config/cursor/auth.json"
+    echo "cursor auth: placed ~/.cursor/auth.json at ~/.config/cursor/auth.json (Linux path)"
+  fi
+
   echo "done."
 
   if tar -tzf "$RESTORE_FILE" | grep -qx 'RESTORE.txt'; then
@@ -150,11 +167,13 @@ abs_paths+=(
   "$HOME_DIR/.cursor/cli-config.json"
   "$HOME_DIR/.cursor/agent-cli-state.json"
   "$HOME_DIR/.cursor/env"
+  "$HOME_DIR/.cursor/auth.json"
 )
 labels+=(
   "cursor CLI settings"
   "cursor CLI state"
   "cursor CLI auth (API key)"
+  "cursor CLI auth (file store: ~/.cursor/auth.json)"
 )
 
 # grok CLI
@@ -234,11 +253,15 @@ trap 'rm -rf "$TMP_BUNDLE"' EXIT
   echo
   echo "Notes:"
   echo "  - File permissions are preserved (ssh keys stay 0600, etc.)."
-  echo "  - Cursor CLI auth IS included via ~/.cursor/env (CURSOR_API_KEY)."
-  echo "    Shell rc must source it (managed block added by setup.sh /"
-  echo "    brew-setup.sh). Run \`agent status\` on the pod to verify."
-  echo "  - factory droid auth (auth.v2.* + factory-cli-certs.pem) IS bundled."
-  echo "    If the mTLS cert has expired on the pod, re-run \`factory login\`."
+  echo "  - Cursor CLI auth IS included via ~/.cursor/auth.json (file store;"
+  echo "    set AGENT_CLI_CREDENTIAL_STORE=file so cursor-agent writes it instead"
+  echo "    of the macOS Keychain). On Linux it is placed at ~/.config/cursor/auth.json"
+  echo "    by --restore. Run \`agent status\` on the pod to verify. ~/.cursor/env"
+  echo "    (CURSOR_API_KEY) is bundled too but is legacy (not read by cursor-agent)."
+  echo "  - factory droid auth (auth.v2.file + auth.v2.key) IS bundled. On the Mac"
+  echo "    set FACTORY_DISABLE_KEYRING=1 so droid writes that portable pair instead"
+  echo "    of the macOS login keychain (auth.v2.loginkeychain is NOT portable to"
+  echo "    Linux). If the mTLS cert has expired on the pod, re-run \`factory login\`."
   echo "  - factory droid settings/preferences ARE bundled: settings.json"
   echo "    (custom models, session defaults, trusted folders), custom droids"
   echo "    (~/.factory/droids), and cron missions (~/.factory/crons)."
