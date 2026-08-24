@@ -149,6 +149,8 @@ append_once "$HOME/.bashrc" 'export PATH="$HOME/.local/bin:$PATH"'
 # uv is installed via pacman above (official `uv` package); ensure ~/.local/bin
 # is on PATH for the rest of this script (devpod-bundle, baseten fallback, etc.).
 export PATH="$HOME/.local/bin:$PATH"
+# shellcheck disable=SC1091
+\. "$HOME/.local/bin/env" 2>/dev/null || true
 
 # Install/update Rust and Cargo
 echo "Installing Rust..."
@@ -184,6 +186,9 @@ paseo onboard --no-relay --voice disable
 # Install/update rtk (Rust Token Killer) - CLI proxy that cuts LLM token usage.
 # Installed from the AUR (rtk-bin = prebuilt binary) via paru; falls back to the
 # official curl installer if paru is unavailable or the AUR build fails.
+# Single Rust binary in ~/.local/bin; ensure that dir is on PATH for this script
+# (the .bashrc append above only applies to future shells).
+export PATH="$HOME/.local/bin:$PATH"
 echo "Installing rtk..."
 if command -v paru >/dev/null 2>&1; then
   paru -S --needed --noconfirm rtk-bin \
