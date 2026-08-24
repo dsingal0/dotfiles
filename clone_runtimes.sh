@@ -10,6 +10,8 @@ REPOS=(
   "git@github.com:basetenlabs/truss.git:truss"
   "git@github.com:basetenlabs/dynamo.git:baseten_dynamo"
   "git@github.com:dsingal0/vllm.git:dsingal_vllm"
+  "git@github.com:dsingal0/async_work_reports.git:async_work_reports"
+  "git@github.com:basetenlabs/mirendil-rollout.git:mirendil-rollout"
   "https://github.com/NVIDIA/TensorRT-LLM.git:TensorRT-LLM"
   "https://github.com/sgl-project/sglang.git:sglang"
   "https://github.com/vllm-project/vllm.git:vllm"

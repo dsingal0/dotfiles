@@ -84,16 +84,12 @@ ensure_pnpm_shell_path
 
 # Uninstall the npm-managed copies of packages now handled by pnpm, so no
 # stale npm binaries linger on PATH.
-npm uninstall -g opencode-ai @opencode-ai/cli droid @getpaseo/cli 2>/dev/null || true
+npm uninstall -g droid @getpaseo/cli 2>/dev/null || true
 
-# Drop any opencode binary left by the old curl installer (~/.opencode/bin) so
-# the pnpm-managed binary is the one on PATH.
-rm -f "$HOME/.opencode/bin/opencode" 2>/dev/null || true
-rmdir "$HOME/.opencode/bin" 2>/dev/null || true
-
-# Uninstall opencode v1 (opencode-ai) so it cannot shadow v2 on PATH.
-echo "Uninstalling opencode (v1)..."
-pnpm remove -g opencode-ai 2>/dev/null || true
+# Uninstall opencode (v1 `opencode` + v2 `opencode2`) from EVERY nvm node
+# version, not just the active one, so no stale copy shadows the fresh install
+# regardless of which node version a shell resolves.
+uninstall_opencode_all_node_versions
 
 install_opencode_v2
 

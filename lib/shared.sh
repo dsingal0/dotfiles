@@ -10,6 +10,30 @@
 # the Factory Baseten BYOK custom-models config previously inlined in both
 # bootstrap scripts.
 
+# Uninstall opencode (v1 opencode-ai -> `opencode`, v2 @opencode-ai/cli ->
+# `opencode2`) from EVERY nvm node version directory, not just the currently
+# active one. `npm uninstall -g` only touches the active node version, so
+# stale copies can linger in other version dirs and shadow the fresh install on
+# PATH. Also drops the old curl-installer copy (~/.opencode/bin). Idempotent.
+uninstall_opencode_all_node_versions() {
+  echo "Uninstalling opencode (all nvm node versions)..."
+  local node_dir bin_dir lib_dir
+  for node_dir in "$NVM_DIR"/versions/node/*/; do
+    [[ -d "$node_dir" ]] || continue
+    bin_dir="$node_dir/bin"
+    lib_dir="$node_dir/lib/node_modules"
+    rm -f "$bin_dir/opencode" "$bin_dir/opencode2" 2>/dev/null || true
+    rm -rf "$lib_dir/opencode-ai" "$lib_dir/@opencode-ai" 2>/dev/null || true
+  done
+  # Old curl installer (~/.opencode/bin/opencode) so the npm-managed binary is
+  # the one on PATH.
+  rm -f "$HOME/.opencode/bin/opencode" 2>/dev/null || true
+  rmdir "$HOME/.opencode/bin" 2>/dev/null || true
+  # Any pnpm-managed copies (pnpm global store) can also shadow the npm binary.
+  pnpm remove -g opencode-ai 2>/dev/null || true
+  pnpm remove -g @opencode-ai/cli 2>/dev/null || true
+}
+
 # Install/update opencode v2 (@opencode-ai/cli@next) via npm.
 # See https://opencode.ai/v2/docs. Note the binary is named opencode2, not opencode.
 #
@@ -19,22 +43,41 @@
 # package's postinstall replaces that stub with the real platform binary. npm
 # always runs postinstall, so this entire class of pnpm store-cache bugs goes away.
 install_opencode_v2() {
-  echo "Installing opencode (v2)..."
+  echo "Installing opencode (v2) into every nvm node version..."
 
   # Remove any stale pnpm-managed copy so the npm binary is the one on PATH.
   pnpm remove -g @opencode-ai/cli 2>/dev/null || true
 
-  local attempt
-  for attempt in 1 2 3; do
-    npm install -g @opencode-ai/cli@next
-    if opencode2 --version 2>/dev/null; then
-      return 0
-    fi
-    echo "Warning: opencode2 is not runnable (attempt $attempt/3); retrying..." >&2
-    sleep 2
+  # `npm install -g` only installs into the currently active node version, so
+  # the binary would be missing (or stale) in every other nvm version and shadow
+  # on PATH depending on which version a shell resolves. Install into EVERY node
+  # version dir so opencode2 is present regardless of which is active.
+  #
+  # --allow-scripts=@opencode-ai/cli is required on newer npm (11.x): its
+  # install-scripts security feature blocks the package's postinstall (which
+  # replaces the stub bin/opencode2.exe with the real platform binary) unless
+  # explicitly allowed. Without it the binary stays a broken stub that errors
+  # with "postinstall script was not run".
+  local node_dir bin_dir attempt installed=0
+  for node_dir in "$NVM_DIR"/versions/node/*/; do
+    [[ -d "$node_dir" ]] || continue
+    bin_dir="$node_dir/bin"
+    for attempt in 1 2 3; do
+      if PATH="$bin_dir:$PATH" npm install -g --allow-scripts=@opencode-ai/cli @opencode-ai/cli@next >/dev/null 2>&1 && \
+         PATH="$bin_dir:$PATH" opencode2 --version >/dev/null 2>&1; then
+        echo "  opencode2 ready: $bin_dir"
+        installed=$((installed + 1))
+        break
+      fi
+      echo "Warning: opencode2 not runnable in $bin_dir (attempt $attempt/3); retrying..." >&2
+      sleep 2
+    done
   done
-  echo "Warning: opencode2 is still not runnable after 3 attempts (continuing)" >&2
-  echo "  Fix manually: npm install -g @opencode-ai/cli@next" >&2
+
+  if [[ "$installed" -eq 0 ]]; then
+    echo "Warning: opencode2 could not be installed in any node version (continuing)" >&2
+    echo "  Fix manually: npm install -g @opencode-ai/cli@next" >&2
+  fi
   return 0
 }
 
