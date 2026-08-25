@@ -103,7 +103,8 @@ is skipped with a warning.
   carried to dev pods by `devpod-bundle`
 - tmux config symlinked to `~/.tmux.conf`
 - **~/venv** (via `uv`) with **truss** (Baseten model authoring / deploy-loop)
-- **croc** (file transfer, replaces magic-wormhole) - brew formula on macOS,
+  and **magic-wormhole** (file transfer); `wormhole` symlinked to `~/.local/bin`
+- **croc** (file transfer) - brew formula on macOS,
   GitHub release binary into `~/.local/bin` on Linux
 
 ### Linux (`setup.sh`)

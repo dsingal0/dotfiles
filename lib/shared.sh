@@ -148,6 +148,67 @@ with open(path, "w") as f:
 PYEOF
 }
 
+# Ensure runlayer MCP (https://baseten.runlayer.com/mcp) is configured in
+# all three harnesses: opencode2, droid, and cursor-cli. Idempotent.
+configure_runlayer_mcp() {
+  local url="https://baseten.runlayer.com/mcp"
+  # opencode2 -> ~/.config/opencode/opencode.json (v2: mcp.servers.<name>)
+  mkdir -p ~/.config/opencode
+  python3 - << 'PYEOF'
+import json, os
+path = os.path.expanduser("~/.config/opencode/opencode.json")
+try:
+    with open(path) as f:
+        cfg = json.load(f)
+except (FileNotFoundError, json.JSONDecodeError):
+    cfg = {}
+cfg.setdefault("$schema", "https://opencode.ai/config.json")
+cfg.setdefault("mcp", {})
+cfg["mcp"].setdefault("servers", {})
+cfg["mcp"]["servers"]["runlayer"] = {"type": "remote", "url": "https://baseten.runlayer.com/mcp"}
+with open(path, "w") as f:
+    json.dump(cfg, f, indent=2)
+    f.write("\n")
+PYEOF
+  echo "  opencode runlayer MCP configured"
+
+  # droid / Factory -> ~/.factory/mcp.json (mcpServers.<name> with type http)
+  mkdir -p ~/.factory
+  python3 - << 'PYEOF'
+import json, os
+path = os.path.expanduser("~/.factory/mcp.json")
+try:
+    with open(path) as f:
+        data = json.load(f)
+except (FileNotFoundError, json.JSONDecodeError):
+    data = {}
+data.setdefault("mcpServers", {})
+data["mcpServers"]["runlayer"] = {"type": "http", "url": "https://baseten.runlayer.com/mcp", "disabled": False}
+with open(path, "w") as f:
+    json.dump(data, f, indent=2)
+    f.write("\n")
+PYEOF
+  echo "  droid runlayer MCP configured"
+
+  # cursor CLI -> ~/.cursor/mcp.json (mcpServers.<name> with url)
+  mkdir -p ~/.cursor
+  python3 - << 'PYEOF'
+import json, os
+path = os.path.expanduser("~/.cursor/mcp.json")
+try:
+    with open(path) as f:
+        data = json.load(f)
+except (FileNotFoundError, json.JSONDecodeError):
+    data = {}
+data.setdefault("mcpServers", {})
+data["mcpServers"]["runlayer"] = {"url": "https://baseten.runlayer.com/mcp"}
+with open(path, "w") as f:
+    json.dump(data, f, indent=2)
+    f.write("\n")
+PYEOF
+  echo "  cursor runlayer MCP configured"
+}
+
 # Symlink the repo's global opencode instructions into
 # ~/.config/opencode/AGENTS.md so every project session picks up the same
 # global rules (no /tmp, lowercase names, worktrees above the repo, Docker
@@ -815,9 +876,12 @@ install_baseten_cli() {
 
 # Ensure uv is available, create ~/venv if missing, and install/upgrade into
 # that venv:
-#   - truss    (Baseten model authoring / deploy-loop)
+#   - truss          (Baseten model authoring / deploy-loop)
+#   - magic-wormhole (file transfer, alongside croc)
+# The wormhole CLI is symlinked into ~/.local/bin so it's on PATH without
+# activating the venv.
 ensure_venv() {
-  echo "Ensuring ~/venv with truss..."
+  echo "Ensuring ~/venv with truss and magic-wormhole..."
   # Common install locations for uv (curl installer + Homebrew).
   export PATH="$HOME/.local/bin:$HOME/.cargo/bin:/opt/homebrew/bin:/usr/local/bin:$PATH"
 
@@ -836,13 +900,14 @@ ensure_venv() {
   if [[ ! -x "$HOME/venv/bin/python" ]]; then
     uv venv "$HOME/venv"
   fi
-  uv pip install --python "$HOME/venv/bin/python" --upgrade truss
+  uv pip install --python "$HOME/venv/bin/python" --upgrade truss magic-wormhole
   if [[ -x "$HOME/venv/bin/truss" ]]; then
     echo "  truss: $("$HOME/venv/bin/truss" version 2>/dev/null || "$HOME/venv/bin/python" -c 'import truss; print(getattr(truss, "__version__", "installed"))')"
   fi
-  # magic-wormhole was replaced by croc; remove the stale venv symlink.
-  if [[ -L "$HOME/.local/bin/wormhole" ]]; then
-    rm -f "$HOME/.local/bin/wormhole"
+  if [[ -x "$HOME/venv/bin/wormhole" ]]; then
+    mkdir -p "$HOME/.local/bin"
+    ln -sfn "$HOME/venv/bin/wormhole" "$HOME/.local/bin/wormhole"
+    echo "  wormhole: $("$HOME/venv/bin/wormhole" --version 2>/dev/null || echo installed)"
   fi
   echo "  venv ready at $HOME/venv (activate with: source ~/venv/bin/activate)"
 }

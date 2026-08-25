@@ -122,6 +122,7 @@ install_opencode_v2
 curl -fsSL https://dev.meta.ai/install.sh | bash
 
 configure_opencode_permission
+configure_runlayer_mcp
 
 # Install the repo's global opencode instructions (~/.config/opencode/AGENTS.md)
 # so every project session follows the same global rules.
@@ -241,7 +242,7 @@ install_skill_packages false false
 # Homebrew if available, else GitHub release -> ~/.local/bin
 install_baseten_cli
 
-# croc file transfer (https://github.com/schollz/croc); replaces magic-wormhole.
+# croc file transfer (https://github.com/schollz/croc).
 # Installed via pacman above (official `croc` package); fall back to the GitHub
 # release binary if pacman didn't provide it.
 if ! command -v croc >/dev/null 2>&1; then

@@ -128,6 +128,7 @@ cp "$ALIASES_FILE" "$SCRIPT_DIR/baseten_aliases"
 
 # opencode itself is installed above, before the other coding harnesses.
 configure_opencode_permission
+configure_runlayer_mcp
 
 # Install the repo's global opencode instructions (~/.config/opencode/AGENTS.md)
 # so every project session follows the same global rules.
