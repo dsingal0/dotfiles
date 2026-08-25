@@ -20,7 +20,7 @@ brew trust basetenlabs/baseten 2>/dev/null || true
 # `baseten` = basetenlabs/baseten-cli (https://github.com/basetenlabs/baseten-cli); `uv` for ~/venv + truss.
 FORMULAS=(baseten btop croc gh node mole pnpm rtk tmux uv)
 # ghostty = terminal emulator. grok-build has no official curl installer, so it
-# stays a cask; droid / opencode install via pnpm below, cursor-cli via curl.
+# stays a cask; droid / opencode install via npm below, cursor-cli via curl.
 # font-jetbrains-mono-nerd-font = JetBrains Mono with Nerd Font glyphs for TUIs.
 CASKS=(brave-browser@beta ghostty font-jetbrains-mono-nerd-font)
 CASKS+=(grok-build)
@@ -47,20 +47,13 @@ export PNPM_HOME
 export PATH="$PNPM_HOME/bin:$PATH"
 
 # Uninstall the npm-managed copies of packages now handled by pnpm, so no
-# stale npm binaries linger on PATH.
-npm uninstall -g opencode-ai @opencode-ai/cli droid @getpaseo/cli 2>/dev/null || true
+# stale npm binaries linger on PATH. opencode is still npm-managed (postinstall
+# must run); drop droid/paseo here so they don't shadow the pnpm/npm swap below.
+npm uninstall -g droid @getpaseo/cli 2>/dev/null || true
 
-# Coding harnesses: opencode and droid install via pnpm (latest), grok-build is
-# in the cask loop below and cursor-cli is further down.
-# Drop any opencode binary left by the old curl installer (~/.opencode/bin) so
-# the pnpm-managed binary is the one on PATH.
-rm -f "$HOME/.opencode/bin/opencode" 2>/dev/null || true
-rmdir "$HOME/.opencode/bin" 2>/dev/null || true
-
-# Uninstall opencode v1 (opencode-ai) so it cannot shadow v2 on PATH.
-echo "Uninstalling opencode (v1)..."
-pnpm remove -g opencode-ai 2>/dev/null || true
-
+# Coding harnesses: opencode via npm (v2 / opencode2), droid via npm, grok-build
+# is in the cask loop below and cursor-cli is further down.
+uninstall_opencode_all_node_versions
 install_opencode_v2
 
 # Install/update Meta CLI.
@@ -70,7 +63,7 @@ curl -fsSL https://dev.meta.ai/install.sh | bash
 # the npm-managed binary is the one on PATH. Also remove any stale pnpm-managed
 # copy (npm always runs postinstall scripts, avoiding pnpm store-cache issues).
 rm -f "$HOME/.local/bin/droid" 2>/dev/null || true
-pnpm remove -g droid 2>/dev/null || true
+pnpm_remove_global droid
 echo "Installing droid..."
 npm install -g droid
 droid --version 2>/dev/null || true
@@ -178,7 +171,7 @@ ensure_venv
 
 # Install paseo CLI via npm (pre-release track via the `beta` dist-tag).
 # npm is used instead of pnpm because npm always runs postinstall scripts.
-pnpm remove -g @getpaseo/cli 2>/dev/null || true
+pnpm_remove_global @getpaseo/cli
 npm install -g @getpaseo/cli@beta
 
 # Remove stale downloads and old versions

@@ -107,17 +107,14 @@ export PATH="$PNPM_HOME/bin:$PATH"
 ensure_pnpm_shell_path
 
 # Uninstall the npm-managed copies of packages now handled by pnpm, so no
-# stale npm binaries linger on PATH.
-npm uninstall -g opencode-ai @opencode-ai/cli droid @getpaseo/cli 2>/dev/null || true
+# stale npm binaries linger on PATH. opencode is still npm-managed (postinstall
+# must run); drop droid/paseo here so they don't shadow the npm reinstall below.
+npm uninstall -g droid @getpaseo/cli 2>/dev/null || true
 
-# Drop any opencode binary left by the old curl installer (~/.opencode/bin) so
-# the pnpm-managed binary is the one on PATH.
-rm -f "$HOME/.opencode/bin/opencode" 2>/dev/null || true
-rmdir "$HOME/.opencode/bin" 2>/dev/null || true
-
-# Uninstall opencode v1 (opencode-ai) so it cannot shadow v2 on PATH.
-echo "Uninstalling opencode (v1)..."
-pnpm remove -g opencode-ai 2>/dev/null || true
+# Uninstall opencode (v1 `opencode` + v2 `opencode2`) from EVERY nvm node
+# version, not just the active one, so no stale copy shadows the fresh install
+# regardless of which node version a shell resolves.
+uninstall_opencode_all_node_versions
 
 install_opencode_v2
 
@@ -136,7 +133,7 @@ install_global_agents_md "$SCRIPT_DIR"
 # the npm-managed binary is the one on PATH. Also remove any stale pnpm-managed
 # copy (npm always runs postinstall scripts, avoiding pnpm store-cache issues).
 rm -f "$HOME/.local/bin/droid" 2>/dev/null || true
-pnpm remove -g droid 2>/dev/null || true
+pnpm_remove_global droid
 echo "Installing droid..."
 npm install -g droid
 
@@ -177,7 +174,7 @@ curl https://cursor.com/install -fsS | bash
 
 # Install/update paseo (pre-release track via the `beta` dist-tag)
 echo "Installing paseo..."
-pnpm remove -g @getpaseo/cli 2>/dev/null || true
+pnpm_remove_global @getpaseo/cli
 npm install -g @getpaseo/cli@beta
 # Bare `paseo` runs onboard and prompts for relay pairing + voice on a TTY.
 # --no-relay skips device pairing; --voice disable skips voice model downloads.

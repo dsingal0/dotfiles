@@ -10,28 +10,50 @@
 # the Factory Baseten BYOK custom-models config previously inlined in both
 # bootstrap scripts.
 
+# pnpm prints [ERR_PNPM_GLOBAL_PKG_NOT_FOUND] to stdout (not stderr) when the
+# package isn't in the global store. Redirect both so idempotent uninstalls
+# stay quiet under `set -euo pipefail`.
+pnpm_remove_global() {
+  command -v pnpm >/dev/null 2>&1 || return 0
+  pnpm remove -g "$@" >/dev/null 2>&1 || true
+}
+
+# nvm node version dirs, if any. Empty when nvm isn't installed (brew-setup.sh
+# uses Homebrew node). Safe under `set -u` — never expands an unbound NVM_DIR.
+_nvm_node_version_dirs() {
+  local nvm_dir="${NVM_DIR:-$HOME/.nvm}"
+  [[ -d "$nvm_dir/versions/node" ]] || return 0
+  local d
+  for d in "$nvm_dir"/versions/node/*/; do
+    [[ -d "$d" ]] && printf '%s\n' "$d"
+  done
+}
+
 # Uninstall opencode (v1 opencode-ai -> `opencode`, v2 @opencode-ai/cli ->
 # `opencode2`) from EVERY nvm node version directory, not just the currently
 # active one. `npm uninstall -g` only touches the active node version, so
 # stale copies can linger in other version dirs and shadow the fresh install on
 # PATH. Also drops the old curl-installer copy (~/.opencode/bin). Idempotent.
+# Works without nvm (Homebrew / system node): skips the version-dir loop.
 uninstall_opencode_all_node_versions() {
-  echo "Uninstalling opencode (all nvm node versions)..."
+  echo "Uninstalling opencode (v1 + stale copies)..."
   local node_dir bin_dir lib_dir
-  for node_dir in "$NVM_DIR"/versions/node/*/; do
-    [[ -d "$node_dir" ]] || continue
+  while IFS= read -r node_dir; do
+    [[ -n "$node_dir" ]] || continue
     bin_dir="$node_dir/bin"
     lib_dir="$node_dir/lib/node_modules"
     rm -f "$bin_dir/opencode" "$bin_dir/opencode2" 2>/dev/null || true
     rm -rf "$lib_dir/opencode-ai" "$lib_dir/@opencode-ai" 2>/dev/null || true
-  done
+  done < <(_nvm_node_version_dirs)
   # Old curl installer (~/.opencode/bin/opencode) so the npm-managed binary is
   # the one on PATH.
   rm -f "$HOME/.opencode/bin/opencode" 2>/dev/null || true
   rmdir "$HOME/.opencode/bin" 2>/dev/null || true
+  # Current npm prefix (Homebrew node, or the active nvm version). Idempotent.
+  npm uninstall -g opencode-ai @opencode-ai/cli >/dev/null 2>&1 || true
   # Any pnpm-managed copies (pnpm global store) can also shadow the npm binary.
-  pnpm remove -g opencode-ai 2>/dev/null || true
-  pnpm remove -g @opencode-ai/cli 2>/dev/null || true
+  pnpm_remove_global opencode-ai
+  pnpm_remove_global @opencode-ai/cli
 }
 
 # Install/update opencode v2 (@opencode-ai/cli@next) via npm.
@@ -42,41 +64,63 @@ uninstall_opencode_all_node_versions() {
 # stub at bin/opencode2.exe ("postinstall script was not run" / exit 1), and the
 # package's postinstall replaces that stub with the real platform binary. npm
 # always runs postinstall, so this entire class of pnpm store-cache bugs goes away.
+#
+# --allow-scripts=@opencode-ai/cli is required on newer npm (11.x): its
+# install-scripts security feature blocks the package's postinstall (which
+# replaces the stub bin/opencode2.exe with the real platform binary) unless
+# explicitly allowed. Without it the binary stays a broken stub that errors
+# with "postinstall script was not run".
+
+# Install @opencode-ai/cli@next into the npm whose bin dir is $1. Returns 0 if
+# `opencode2 --version` then succeeds.
+_install_opencode_v2_into() {
+  local bin_dir="$1"
+  local attempt
+  for attempt in 1 2 3; do
+    if PATH="$bin_dir:$PATH" npm install -g --allow-scripts=@opencode-ai/cli @opencode-ai/cli@next >/dev/null 2>&1 && \
+       PATH="$bin_dir:$PATH" opencode2 --version >/dev/null 2>&1; then
+      echo "  opencode2 ready: $bin_dir"
+      return 0
+    fi
+    echo "Warning: opencode2 not runnable in $bin_dir (attempt $attempt/3); retrying..." >&2
+    sleep 2
+  done
+  return 1
+}
+
 install_opencode_v2() {
-  echo "Installing opencode (v2) into every nvm node version..."
+  echo "Installing opencode (v2)..."
 
   # Remove any stale pnpm-managed copy so the npm binary is the one on PATH.
-  pnpm remove -g @opencode-ai/cli 2>/dev/null || true
+  pnpm_remove_global @opencode-ai/cli
 
   # `npm install -g` only installs into the currently active node version, so
   # the binary would be missing (or stale) in every other nvm version and shadow
-  # on PATH depending on which version a shell resolves. Install into EVERY node
-  # version dir so opencode2 is present regardless of which is active.
-  #
-  # --allow-scripts=@opencode-ai/cli is required on newer npm (11.x): its
-  # install-scripts security feature blocks the package's postinstall (which
-  # replaces the stub bin/opencode2.exe with the real platform binary) unless
-  # explicitly allowed. Without it the binary stays a broken stub that errors
-  # with "postinstall script was not run".
-  local node_dir bin_dir attempt installed=0
-  for node_dir in "$NVM_DIR"/versions/node/*/; do
-    [[ -d "$node_dir" ]] || continue
+  # on PATH depending on which version a shell resolves. Install into EVERY nvm
+  # node version dir when nvm is present. brew-setup.sh uses Homebrew node and
+  # has no NVM_DIR — also install via the npm currently on PATH.
+  local node_dir bin_dir installed=0 current_bin="" skip_current=0
+  if command -v npm >/dev/null 2>&1; then
+    current_bin="$(dirname "$(command -v npm)")"
+  fi
+  while IFS= read -r node_dir; do
+    [[ -n "$node_dir" ]] || continue
     bin_dir="$node_dir/bin"
-    for attempt in 1 2 3; do
-      if PATH="$bin_dir:$PATH" npm install -g --allow-scripts=@opencode-ai/cli @opencode-ai/cli@next >/dev/null 2>&1 && \
-         PATH="$bin_dir:$PATH" opencode2 --version >/dev/null 2>&1; then
-        echo "  opencode2 ready: $bin_dir"
-        installed=$((installed + 1))
-        break
-      fi
-      echo "Warning: opencode2 not runnable in $bin_dir (attempt $attempt/3); retrying..." >&2
-      sleep 2
-    done
-  done
+    [[ -n "$current_bin" && "$bin_dir" == "$current_bin" ]] && skip_current=1
+    if _install_opencode_v2_into "$bin_dir"; then
+      installed=$((installed + 1))
+    fi
+  done < <(_nvm_node_version_dirs)
+
+  if [[ "$skip_current" -eq 0 && -n "$current_bin" ]]; then
+    if _install_opencode_v2_into "$current_bin"; then
+      installed=$((installed + 1))
+    fi
+  fi
 
   if [[ "$installed" -eq 0 ]]; then
-    echo "Warning: opencode2 could not be installed in any node version (continuing)" >&2
-    echo "  Fix manually: npm install -g @opencode-ai/cli@next" >&2
+    echo "Warning: opencode2 could not be installed (continuing)" >&2
+    echo "  Fix manually: npm install -g --allow-scripts=@opencode-ai/cli @opencode-ai/cli@next" >&2
   fi
   return 0
 }

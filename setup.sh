@@ -108,7 +108,7 @@ install_global_agents_md "$SCRIPT_DIR"
 # the npm-managed binary is the one on PATH. Also remove any stale pnpm-managed
 # copy (npm always runs postinstall scripts, avoiding pnpm store-cache issues).
 rm -f "$HOME/.local/bin/droid" 2>/dev/null || true
-pnpm remove -g droid 2>/dev/null || true
+pnpm_remove_global droid
 echo "Installing droid..."
 npm install -g droid
 
@@ -161,7 +161,7 @@ curl https://cursor.com/install -fsS | bash
 
 # Install/update paseo (pre-release track via the `beta` dist-tag)
 echo "Installing paseo..."
-pnpm remove -g @getpaseo/cli 2>/dev/null || true
+pnpm_remove_global @getpaseo/cli
 npm install -g @getpaseo/cli@beta
 # Bare `paseo` runs onboard and prompts for relay pairing + voice on a TTY.
 # --no-relay skips device pairing; --voice disable skips voice model downloads.
