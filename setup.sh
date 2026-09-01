@@ -90,6 +90,8 @@ npm uninstall -g droid @getpaseo/cli 2>/dev/null || true
 # fork, built from source) is the primary coding agent; carry (PTY daemon with
 # built-in iroh P2P) exposes jcode sessions to the phone app. jcode runs
 # inside carry sessions via `carry session new --cmd jcode`.
+load_env_file "$SCRIPT_DIR"
+
 uninstall_opencode_all_node_versions
 uninstall_opencode_and_omo
 ensure_jcode

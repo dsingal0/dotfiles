@@ -1191,6 +1191,25 @@ uninstall_opencode_and_omo() {
   echo "  opencode + OmO removed (binaries, configs, data dirs)."
 }
 
+# Resolve a clone URL for github.com/<owner>/<repo>, auth-aware:
+#   1. GITHUB_TOKEN (from .env) -> authenticated HTTPS (works for private repos,
+#      no SSH needed during bootstrap)
+#   2. SSH key present and usable -> git@github.com (preferred for pushing)
+#   3. Otherwise -> plain HTTPS (fine for public repos only)
+# Callers pass "owner/repo". Read-only for curl-style use; git clone handles it.
+github_clone_url() {
+  local slug="$1"
+  if [[ -n "${GITHUB_TOKEN:-}" ]]; then
+    # Extra header form needs git -c; embed the token in the URL instead, but
+    # never echo it. git strips credentials from push remotes automatically.
+    echo "https://x-access-token:${GITHUB_TOKEN}@github.com/${slug}.git"
+  elif [[ -f "$HOME/.ssh/id_ed25519" || -f "$HOME/.ssh/id_rsa" ]]; then
+    echo "git@github.com:${slug}.git"
+  else
+    echo "https://github.com/${slug}.git"
+  fi
+}
+
 # Clone or update the dsingal0/jcode fork and build+install the `jcode` binary
 # from source (release profile). Prefers an existing checkout at ~/repos/jcode.
 # Falls back to cloning. Installs to ~/.local/bin (Linux) or /usr/local/bin via
@@ -1217,8 +1236,10 @@ ensure_jcode() {
     git -C "$repo" pull --ff-only origin "$branch" 2>/dev/null || true
   else
     mkdir -p "$(dirname "$repo")"
+    local url
+    url="$(github_clone_url dsingal0/jcode)"
     echo "Cloning dsingal0/jcode ($branch) to $repo..."
-    git clone --branch "$branch" https://github.com/dsingal0/jcode.git "$repo" \
+    git clone --branch "$branch" "$url" "$repo" \
       || git clone https://github.com/dsingal0/jcode.git "$repo"
   fi
 
@@ -1330,8 +1351,18 @@ ensure_carry() {
     git -C "$repo" pull --ff-only 2>/dev/null || true
   else
     mkdir -p "$(dirname "$repo")"
+    local url
+    url="$(github_clone_url dsingal0/remote_agent)"
     echo "Cloning carry (dsingal0/remote_agent) to $repo..."
-    git clone https://github.com/dsingal0/remote_agent.git "$repo"
+    if ! git clone "$url" "$repo"; then
+      echo "ERROR: could not clone dsingal0/remote_agent (private repo)." >&2
+      echo "  The carry daemon source needs GitHub auth, which lands on this" >&2
+      echo "  machine only after 'devpod-bundle --restore'. Two ways forward:" >&2
+      echo "    1. Add GITHUB_TOKEN=<token with repo scope> to .env and re-run setup" >&2
+      echo "    2. Re-run setup after devpod-bundle restores your SSH keys" >&2
+      echo "  Skipping carry build for now." >&2
+      return 0
+    fi
   fi
 
   echo "Building carry (release)..."
