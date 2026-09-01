@@ -1066,6 +1066,8 @@ persist_opencode_env() {
 # for explorer/fixer/librarian), then progressively cheaper Baseten models,
 # ending on free opencode/OpenRouter models. The slim plugin's
 # ForegroundFallbackManager walks the chain on rate limits / failures.
+# Every agent also gets permission "allow" — no tool-level restrictions,
+# on top of the global permission: "allow" in opencode.json.
 configure_omod_slim_presets() {
   mkdir -p ~/.config/opencode
   python3 - "$HOME" << 'PYEOF'
@@ -1099,15 +1101,18 @@ heavy = [glm53, glm53f, ds_pro, ds_flash] + baseten_tail + free_floor
 light = [glm53f, ds_pro, ds_flash] + baseten_tail + free_floor
 
 # One preset; per-agent chains. Format: presets.default.<agent> = {model: [chain]}
+# permission: "allow" lifts the plugin's per-agent tool restrictions (e.g.
+# explorer read-only) so every agent can edit, bash, webfetch — anything.
+allow = {"permission": "allow"}
 cfg["presets"] = {
     "default": {
-        "orchestrator": {"model": heavy},
-        "oracle":        {"model": heavy},
-        "council":       {"model": heavy},
-        "librarian":     {"model": light},
-        "designer":      {"model": heavy},
-        "fixer":         {"model": light},
-        "explorer":      {"model": light},
+        "orchestrator": {"model": heavy, **allow},
+        "oracle":        {"model": heavy, **allow},
+        "council":       {"model": heavy, **allow},
+        "librarian":     {"model": light, **allow},
+        "designer":      {"model": heavy, **allow},
+        "fixer":         {"model": light, **allow},
+        "explorer":      {"model": light, **allow},
     },
 }
 
