@@ -1135,126 +1135,97 @@ ensure_croc() {
 }
 
 # ============================================================================
-# jcode + carry (2026-09 pivot: opencode/OmO removed, jcode is the primary
-# coding agent inside carry PTY sessions; carryd exposes them over iroh).
+# 2026-09 stack: opencode v2 (opencode2, @opencode-ai/cli beta channel) +
+# oh-my-opencode-slim (agent orchestration plugin). jcode/carry remain
+# installed manually; they are not bootstrapped anymore.
 # ============================================================================
 
-# Fully uninstall opencode (v1 + v2), oh-my-openagent (OmO), and all their
-# config/data dirs. Idempotent. Covers: nvm node version dirs, the current npm
-# prefix, pnpm store, the old curl installer, Homebrew (if installed that way),
-# launch agents, and the config/data dirs (~/.opencode, ~/.config/opencode,
-# ~/.local/share/opencode, ~/.cache/opencode, ~/.omo, ~/.local/share/omo).
-uninstall_opencode_and_omo() {
-  echo "Uninstalling opencode + oh-my-openagent (OmO)..."
-  # 1. Binaries from every nvm node version dir.
-  local node_dir bin_dir lib_dir
+# Install/update opencode v2 (@opencode-ai/cli, bin `opencode2`) from the
+# beta dist-tag — that is where v2 ships (the v1 line stays opencode-ai@latest).
+# Installs into EVERY nvm node version dir + the current npm prefix so no
+# stale copy shadows PATH.
+install_opencode_v2() {
+  echo "Installing opencode v2 (@opencode-ai/cli, beta channel)..."
+  local node_dir bin_dir installed=0 current_bin="" skip_current=0
+  if command -v npm >/dev/null 2>&1; then
+    current_bin="$(dirname "$(command -v npm)")"
+  fi
+  _install_v2_into() {
+    local bin_dir="$1"
+    local attempt
+    for attempt in 1 2 3; do
+      if PATH="$bin_dir:$PATH" npm install -g @opencode-ai/cli@beta >/dev/null 2>&1 && \
+         PATH="$bin_dir:$PATH" opencode2 --version >/dev/null 2>&1; then
+        echo "  opencode2 ready: $bin_dir"
+        return 0
+      fi
+      echo "Warning: opencode2 not runnable in $bin_dir (attempt $attempt/3); retrying..." >&2
+      sleep 2
+    done
+    return 1
+  }
   while IFS= read -r node_dir; do
     [[ -n "$node_dir" ]] || continue
     bin_dir="$node_dir/bin"
-    lib_dir="$node_dir/lib/node_modules"
-    rm -f "$bin_dir/opencode" "$bin_dir/opencode2" "$bin_dir/omo" 2>/dev/null || true
-    rm -rf "$lib_dir/opencode-ai" "$lib_dir/@opencode-ai" \
-           "$lib_dir/oh-my-openagent" "$lib_dir/oh-my-opencode" 2>/dev/null || true
+    [[ -n "$current_bin" && "$bin_dir" == "$current_bin" ]] && skip_current=1
+    if _install_v2_into "$bin_dir"; then
+      installed=$((installed + 1))
+    fi
   done < <(_nvm_node_version_dirs)
-
-  # 2. Current package-manager prefixes (npm active version, pnpm, brew).
-  npm uninstall -g opencode-ai @opencode-ai/oh-my-openagent opencode-ai@latest 2>/dev/null || true
-  npm uninstall -g opencode-ai @opencode-ai/cli 2>/dev/null || true
-  pnpm_remove_global opencode-ai @opencode-ai/cli oh-my-openagent oh-my-opencode
-  if command -v brew >/dev/null 2>&1; then
-    brew uninstall --cask opencode 2>/dev/null || true
-    brew uninstall opencode 2>/dev/null || true
+  if [[ "$skip_current" -eq 0 && -n "$current_bin" ]]; then
+    if _install_v2_into "$current_bin"; then
+      installed=$((installed + 1))
+    fi
   fi
-
-  # 3. Old curl-installer and stray launch agents.
-  rm -rf "$HOME/.opencode" 2>/dev/null || true
-  local launch
-  for launch in ~/Library/LaunchAgents/*opencode* ~/Library/LaunchAgents/*omo*; do
-    [[ -e "$launch" ]] || continue
-    launchctl unload "$launch" 2>/dev/null || true
-    rm -f "$launch"
-  done
-
-  # 4. Kill any lingering processes.
-  pkill -f "opencode" 2>/dev/null || true
-  pkill -f "oh-my-open" 2>/dev/null || true
-
-  # 5. Config + data dirs (last, so the binary checks above still see them).
-  rm -rf "$HOME/.config/opencode" \
-         "$HOME/.local/share/opencode" \
-         "$HOME/.cache/opencode" \
-         "$HOME/.local/state/opencode" \
-         "$HOME/.omo" \
-         "$HOME/.cache/oh-my-openagent" \
-         "$HOME/.config/oh-my-openagent" 2>/dev/null || true
-
-  echo "  opencode + OmO removed (binaries, configs, data dirs)."
-}
-
-# Resolve a clone URL for github.com/<owner>/<repo>, auth-aware:
-#   1. GITHUB_TOKEN (from .env) -> authenticated HTTPS (works for private repos,
-#      no SSH needed during bootstrap)
-#   2. SSH key present and usable -> git@github.com (preferred for pushing)
-#   3. Otherwise -> plain HTTPS (fine for public repos only)
-# Callers pass "owner/repo". Read-only for curl-style use; git clone handles it.
-github_clone_url() {
-  local slug="$1"
-  if [[ -n "${GITHUB_TOKEN:-}" ]]; then
-    # Extra header form needs git -c; embed the token in the URL instead, but
-    # never echo it. git strips credentials from push remotes automatically.
-    echo "https://x-access-token:${GITHUB_TOKEN}@github.com/${slug}.git"
-  elif [[ -f "$HOME/.ssh/id_ed25519" || -f "$HOME/.ssh/id_rsa" ]]; then
-    echo "git@github.com:${slug}.git"
-  else
-    echo "https://github.com/${slug}.git"
+  if [[ "$installed" -eq 0 ]]; then
+    echo "WARNING: opencode v2 could not be installed (continuing)" >&2
+    return 0
   fi
-}
-
-# Clone or update the dsingal0/jcode fork and build+install the `jcode` binary
-# from source (release profile). Prefers an existing checkout at ~/repos/jcode.
-# Falls back to cloning. Installs to ~/.local/bin (Linux) or /usr/local/bin via
-# brew prefix on macOS... actually: always ~/.local/bin + PATH persistence, so
-# cargo is the only requirement.
-# Reads JCODE_REPO (default ~/repos/jcode) and optionally JCODE_BRANCH.
-ensure_jcode() {
-  local repo="${JCODE_REPO:-$HOME/repos/jcode}"
-  local branch="${JCODE_BRANCH:-feat/responses-api-and-baseten-reasoning}"
-
-  # cargo is required to build; ensure it exists (rustup).
-  if ! command -v cargo >/dev/null 2>&1; then
-    echo "cargo not found; installing rustup (needed to build jcode)..."
-    curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain stable
-    export PATH="$HOME/.cargo/bin:$PATH"
-  fi
-  command -v cargo >/dev/null 2>&1 || { echo "WARNING: cargo unavailable; cannot build jcode" >&2; return 0; }
-
-  # Clone or update the fork.
-  if [[ -d "$repo/.git" ]]; then
-    echo "Updating jcode fork at $repo..."
-    git -C "$repo" fetch origin "$branch" 2>/dev/null || true
-    git -C "$repo" checkout "$branch" 2>/dev/null || true
-    git -C "$repo" pull --ff-only origin "$branch" 2>/dev/null || true
-  else
-    mkdir -p "$(dirname "$repo")"
-    local url
-    url="$(github_clone_url dsingal0/jcode)"
-    echo "Cloning dsingal0/jcode ($branch) to $repo..."
-    git clone --branch "$branch" "$url" "$repo" \
-      || git clone https://github.com/dsingal0/jcode.git "$repo"
-  fi
-
-  echo "Building jcode (release) — this can take a few minutes..."
-  if (cd "$repo" && cargo build --release 2>&1 | tail -1); then
-    mkdir -p "$HOME/.local/bin"
-    install -m 755 "$repo/target/release/jcode" "$HOME/.local/bin/jcode" 2>/dev/null \
-      || { echo "WARNING: built binary not found at $repo/target/release/jcode"; return 0; }
-    export PATH="$HOME/.local/bin:$PATH"
-    persist_local_bin
-    echo "  jcode installed: $HOME/.local/bin/jcode ($("$HOME/.local/bin/jcode" --version 2>/dev/null | head -1))"
-  else
-    echo "WARNING: jcode build failed; see output above." >&2
+  # Alias `opencode` -> the v2 binary: slim's installer and other tooling look
+  # for the `opencode` name; v2 is the current line so it wins the name.
+  v2_bin="$(command -v opencode2 || true)"
+  if [[ -n "$v2_bin" ]] && { [[ ! -e "$(dirname "$v2_bin")/opencode" ]] || [[ -L "$(dirname "$v2_bin")/opencode" ]]; }; then
+    ln -sfn "$v2_bin" "$(dirname "$v2_bin")/opencode"
+    echo "  aliased opencode -> opencode2"
   fi
   return 0
+}
+
+# Install oh-my-opencode-slim (agent orchestration plugin) and pin the exact
+# version in ~/.config/opencode/opencode.json — v2 auto-refreshes unpinned
+# plugins, and slim recommends pinning while both projects move fast.
+# Uses bunx when bun exists, else npx (the published CLI is a Node bundle).
+install_omod_slim() {
+  local slim_version
+  slim_version="$(npm view oh-my-opencode-slim version 2>/dev/null || echo "2.2.17")"
+  echo "Installing oh-my-opencode-slim@$slim_version..."
+  if command -v bun >/dev/null 2>&1; then
+    bunx "oh-my-opencode-slim@$slim_version" install || \
+      echo "WARNING: slim installer reported errors (continuing)." >&2
+  else
+    npx --yes "oh-my-opencode-slim@$slim_version" install || \
+      echo "WARNING: slim installer reported errors (continuing)." >&2
+  fi
+  # Pin the version in the opencode config (v2 refreshes unpinned plugins).
+  SLIM_VERSION="$slim_version" python3 - << 'PYEOF'
+import json, os, sys
+version = os.environ["SLIM_VERSION"]
+path = os.path.expanduser("~/.config/opencode/opencode.json")
+try:
+    with open(path) as f:
+        cfg = json.load(f)
+except (FileNotFoundError, json.JSONDecodeError):
+    cfg = {}
+plugins = [p for p in cfg.get("plugin", []) if not str(p).startswith("oh-my-opencode-slim")]
+entry = "oh-my-opencode-slim@" + version
+plugins.append(entry)
+cfg["plugin"] = plugins
+with open(path, "w") as f:
+    json.dump(cfg, f, indent=2)
+    f.write("\n")
+print("  slim pinned:", entry)
+PYEOF
+  echo "  oh-my-opencode-slim installed."
 }
 
 # Persist ~/.local/bin onto PATH in shell rc files (managed block).
