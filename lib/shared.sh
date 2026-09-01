@@ -1280,3 +1280,69 @@ PYEOF
   done
 }
 
+
+# Write oh-my-opencode-slim per-agent presets + model chains into the opencode
+# config. Chains are intelligence-ordered: best Baseten model first, then
+# progressively cheaper/flash variants, then free OpenCode/OpenRouter models.
+# Each agent's primary model is its "best" (deep reasoning for orchestrator/
+# oracle/council, fast for explorer/fixer/librarian).
+configure_omod_slim_presets() {
+  mkdir -p ~/.config/opencode
+  python3 - "$HOME" << 'PYEOF'
+import json, os
+
+home = os.environ["HOME"]
+path = os.path.join(home, ".config/opencode/opencode.json")
+try:
+    with open(path) as f:
+        cfg = json.load(f)
+except (FileNotFoundError, json.JSONDecodeError):
+    cfg = {}
+
+# Per-agent model presets. Format: presets.<name>.<agent> = {model, variant?}
+cfg["presets"] = {
+    "default": {
+        "orchestrator": {"model": "baseten/zai-org/GLM-5.3"},
+        "oracle":        {"model": "baseten/zai-org/GLM-5.3"},
+        "council":       {"model": "baseten/zai-org/GLM-5.3"},
+        "librarian":     {"model": "baseten/zai-org/GLM-5.3-Flash"},
+        "designer":      {"model": "baseten/zai-org/GLM-5.3"},
+        "fixer":         {"model": "baseten/zai-org/GLM-5.3-Flash"},
+        "explorer":      {"model": "baseten/zai-org/GLM-5.3-Flash"},
+    },
+    "best": {
+        "orchestrator": {"model": "baseten/zai-org/GLM-5.3"},
+        "oracle":        {"model": "baseten/zai-org/GLM-5.3"},
+        "council":       {"model": "baseten/zai-org/GLM-5.3"},
+        "librarian":     {"model": "baseten/zai-org/GLM-5.3"},
+        "designer":      {"model": "baseten/zai-org/GLM-5.3"},
+        "fixer":         {"model": "baseten/zai-org/GLM-5.3"},
+        "explorer":      {"model": "baseten/zai-org/GLM-5.3"},
+    },
+    "fast": {
+        "orchestrator": {"model": "baseten/zai-org/GLM-5.3-Flash"},
+        "oracle":        {"model": "baseten/zai-org/GLM-5.3-Flash"},
+        "council":       {"model": "baseten/zai-org/GLM-5.3-Flash"},
+        "librarian":     {"model": "baseten/deepseek-ai/DeepSeek-V4-Flash-0731"},
+        "designer":      {"model": "baseten/zai-org/GLM-5.3-Flash"},
+        "fixer":         {"model": "baseten/zai-org/GLM-5.3-Flash"},
+        "explorer":      {"model": "baseten/deepseek-ai/DeepSeek-V4-Flash-0731"},
+    },
+    "free": {
+        "orchestrator": {"model": "opencode/nvidia/nemotron-3-ultra-550b-a55b:free"},
+        "oracle":        {"model": "opencode/nvidia/nemotron-3-ultra-550b-a55b:free"},
+        "council":       {"model": "opencode/nvidia/nemotron-3-ultra-550b-a55b:free"},
+        "librarian":     {"model": "opencode/nvidia/nemotron-3-ultra-550b-a55b:free"},
+        "designer":      {"model": "opencode/nvidia/nemotron-3-ultra-550b-a55b:free"},
+        "fixer":         {"model": "opencode/nvidia/nemotron-3-ultra-550b-a55b:free"},
+        "explorer":      {"model": "opencode/nvidia/nemotron-3-ultra-550b-a55b:free"},
+    },
+}
+
+with open(path, "w") as f:
+    json.dump(cfg, f, indent=2)
+    f.write("\n")
+print("  per-agent presets configured (default/best/fast/free)")
+PYEOF
+  echo "  oh-my-opencode-slim presets written."
+}
