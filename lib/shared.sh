@@ -1048,6 +1048,17 @@ persist_local_bin() {
     'export PATH="$HOME/.local/bin:$PATH"'
 }
 
+# Persist the env flags oh-my-opencode-slim needs for background orchestration
+# and the built-in Exa websearch tool (managed blocks in shell rc files), so a
+# plain `opencode` launch in any new shell has them applied. The slim
+# installer prints these as "next steps"; we set them once, idempotently.
+persist_opencode_env() {
+  persist_export_to_rc "OPENCODE_EXPERIMENTAL_BACKGROUND_SUBAGENTS" "true"
+  persist_export_to_rc "OPENCODE_ENABLE_EXA" "1"
+  persist_export_to_rc "OPENCODE_ENABLE_PARALLEL" "true"
+  echo "  opencode env flags persisted (background subagents, Exa websearch)"
+}
+
 
 # Write oh-my-opencode-slim per-agent model fallback chains into the opencode
 # config. One preset ("default"): each agent gets an intelligence-ordered
@@ -1106,4 +1117,5 @@ with open(path, "w") as f:
 print("  per-agent fallback chains configured (single 'default' preset)")
 PYEOF
   echo "  oh-my-opencode-slim presets written."
+  persist_opencode_env
 }
