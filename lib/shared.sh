@@ -404,26 +404,25 @@ load_env_file() {
   fi
 }
 
-# Persist `export <VAR>=<value>` into shell rc files (~/.bashrc always;
-# ~/.zshrc if it exists) inside a managed block so re-runs update the value
-# instead of duplicating lines. New shells pick it up automatically; existing
-# shells need `source ~/.bashrc` (or a new terminal) to see it. The value is
-# single-quoted and embedded single quotes are escaped.
-persist_export_to_rc() {
-  local var="$1" value="$2"
-  [[ -z "$value" ]] && return 0
-  local rc_files=( "$HOME/.bashrc" )
+# Generic managed-block writer shared by persist_export_to_rc and
+# configure_cursor. For each rc file (~/.bashrc always; ~/.zshrc if it
+# exists): remove any previous block between the two markers, then append
+# the fresh block at the end of the file.
+# Usage: write_managed_rc_block <open_marker> <close_marker> <body>
+write_managed_rc_block() {
+  local open_m="$1" close_m="$2" body="$3"
+  local rc rc_files=( "$HOME/.bashrc" )
   [[ -f "$HOME/.zshrc" ]] && rc_files+=( "$HOME/.zshrc" )
   for rc in "${rc_files[@]}"; do
     touch "$rc"
-    VAR="$var" VALUE="$value" python3 - "$rc" << 'PYEOF'
+    OPEN_M="$open_m" CLOSE_M="$close_m" BODY="$body" python3 - "$rc" << 'PYEOF'
 import os, re, sys
 
 path = sys.argv[1]
-var = os.environ["VAR"]
-value = os.environ["VALUE"]
-open_m = "# >>> %s (managed by dotfiles setup) >>>" % var
-close_m = "# <<< %s <<<" % var
+open_m = os.environ["OPEN_M"]
+close_m = os.environ["CLOSE_M"]
+body = os.environ["BODY"]
+block = "%s\n%s\n%s" % (open_m, body, close_m)
 
 try:
     with open(path) as f:
@@ -431,8 +430,6 @@ try:
 except FileNotFoundError:
     content = ""
 
-escaped = value.replace("'", "'\\''")
-block = "%s\nexport %s='%s'\n%s" % (open_m, var, escaped, close_m)
 pat = re.compile(r"\n?" + re.escape(open_m) + r".*?" + re.escape(close_m) + r"\n?", re.DOTALL)
 content = pat.sub("\n", content)
 content = content.rstrip()
@@ -444,6 +441,22 @@ with open(path, "w") as f:
     f.write(content)
 PYEOF
   done
+}
+
+# Persist `export <VAR>=<value>` into shell rc files (~/.bashrc always;
+# ~/.zshrc if it exists) inside a managed block so re-runs update the value
+# instead of duplicating lines. New shells pick it up automatically; existing
+# shells need `source ~/.bashrc` (or a new terminal) to see it. The value is
+# single-quoted and embedded single quotes are escaped.
+persist_export_to_rc() {
+  local var="$1" value="$2"
+  [[ -z "$value" ]] && return 0
+  local qesc="'\''"
+  local escaped="${value//\'/${qesc}}"
+  write_managed_rc_block \
+    "# >>> ${var} (managed by dotfiles setup) >>>" \
+    "# <<< ${var} <<<" \
+    "export ${var}='${escaped}'"
 }
 
 # One-shot Factory configuration shared by both bootstrap scripts:
@@ -484,34 +497,11 @@ configure_factory() {
 configure_cursor() {
   persist_export_to_rc "AGENT_CLI_CREDENTIAL_STORE" "file"
 
-  local rc_files=( "$HOME/.bashrc" )
-  [[ -f "$HOME/.zshrc" ]] && rc_files+=( "$HOME/.zshrc" )
   local source_line='[ -f "$HOME/.cursor/env" ] && . "$HOME/.cursor/env"'
-  local rc
-  for rc in "${rc_files[@]}"; do
-    touch "$rc"
-    RC_FILE="$rc" SOURCE_LINE="$source_line" python3 - "$rc" << 'PYEOF'
-import os, re, sys
-path = sys.argv[1]
-line = os.environ["SOURCE_LINE"]
-open_m = "# >>> cursor env (managed by dotfiles setup) >>>"
-close_m = "# <<< cursor env <<<"
-try:
-    with open(path) as f:
-        content = f.read()
-except FileNotFoundError:
-    content = ""
-block = "%s\n%s\n%s" % (open_m, line, close_m)
-pat = re.compile(r"\n?" + re.escape(open_m) + r".*?" + re.escape(close_m) + r"\n?", re.DOTALL)
-content = pat.sub("\n", content)
-content = content.rstrip()
-if content:
-    content += "\n\n"
-content += block + "\n"
-with open(path, "w") as f:
-    f.write(content)
-PYEOF
-  done
+  write_managed_rc_block \
+    '# >>> cursor env (managed by dotfiles setup) >>>' \
+    '# <<< cursor env <<<' \
+    "$source_line"
 
   # Linux: cursor-agent reads ~/.config/cursor/auth.json; a restored bundle puts
   # the file at ~/.cursor/auth.json, so bridge the two.
@@ -1192,4 +1182,66 @@ with open(path, "w") as f:
 print("  per-agent presets configured (default/best/fast/free)")
 PYEOF
   echo "  oh-my-opencode-slim presets written."
+}
+
+# Automatic model failover via the opencode-auto-fallback plugin: transient 429s
+# get exponential-backoff retries on the same model; hard quota/auth errors and
+# exhausted retries fail over to the next model in the agent's chain (with a
+# cooldown, so a rate-limited model is skipped until it recovers).
+# Chains mirror the "default" preset above: GLM-5.3 -> GLM-5.3-Flash ->
+# DeepSeek-V4-Flash-0731, one tier down from each agent's primary.
+# NOTE: the model chain is also pinned in configure_opencode_baseten_provider and
+# configure_omod_slim_presets — update all three together when models change.
+configure_opencode_fallback() {
+  mkdir -p ~/.config/opencode
+  python3 - "$HOME" << 'PYEOF'
+import json, os
+
+home = os.environ["HOME"]
+fb_path = os.path.join(home, ".config/opencode/fallback.json")
+
+# Don't clobber a hand-tuned config on re-runs; only write if missing.
+if os.path.exists(fb_path):
+    print("  fallback.json already exists — keeping it")
+else:
+    glm = "baseten/zai-org/GLM-5.3"
+    glm_fast = "baseten/zai-org/GLM-5.3-Flash"
+    ds_fast = "baseten/deepseek-ai/DeepSeek-V4-Flash-0731"
+    agents = {
+        # Primary GLM-5.3 -> drop one tier, then two.
+        "orchestrator": {"fallback": [glm_fast, ds_fast]},
+        "oracle":       {"fallback": [glm_fast, ds_fast]},
+        "council":      {"fallback": [glm_fast, ds_fast]},
+        "designer":     {"fallback": [glm_fast, ds_fast]},
+        # Primary already GLM-5.3-Flash -> drop to the cheap model.
+        "librarian":    {"fallback": [ds_fast]},
+        "fixer":        {"fallback": [ds_fast]},
+        "explorer":     {"fallback": [ds_fast]},
+    }
+    cfg = {
+        "enabled": True,
+        "defaultFallback": [glm_fast, ds_fast],
+        "agents": agents,
+    }
+    with open(fb_path, "w") as f:
+        json.dump(cfg, f, indent=2)
+        f.write("\n")
+    print("  fallback chains written (GLM-5.3 -> GLM-5.3-Flash -> DeepSeek-V4-Flash)")
+
+# Register the plugin (unpinned, tracks latest), same as omod-slim.
+oc_path = os.path.join(home, ".config/opencode/opencode.json")
+try:
+    with open(oc_path) as f:
+        oc = json.load(f)
+except (FileNotFoundError, json.JSONDecodeError):
+    oc = {}
+plugins = [p for p in oc.get("plugin", []) if p != "opencode-auto-fallback"]
+plugins.append("opencode-auto-fallback")
+oc["plugin"] = plugins
+with open(oc_path, "w") as f:
+    json.dump(oc, f, indent=2)
+    f.write("\n")
+print("  opencode-auto-fallback plugin registered")
+PYEOF
+  echo "  automatic model fallback configured."
 }

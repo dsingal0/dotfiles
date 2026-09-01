@@ -89,6 +89,11 @@ Both keys are gitignored and never committed.
   **oh-my-opencode-slim** orchestration plugin, with the Baseten provider
   written to `~/.config/opencode/opencode.json` (requires `BASETEN_API_KEY`).
   Stale v1 / OmO copies across all nvm node version dirs are removed first.
+- **automatic model fallback** via the `opencode-auto-fallback` plugin:
+  transient 429s get backoff retries on the same model, then the session fails
+  over one tier down the chain — GLM-5.3 → GLM-5.3-Flash → DeepSeek-V4-Flash
+  (per-agent chains in `~/.config/opencode/fallback.json`; existing files are
+  never overwritten on re-run).
 - **droid** (Factory CLI) via npm, with Baseten BYOK custom models written to
   `~/.factory/settings.json` (requires `BASETEN_API_KEY`).
 - **FACTORY_API_KEY** and **FACTORY_DISABLE_KEYRING=1** persisted to shell rc
