@@ -96,7 +96,6 @@ uninstall_opencode_all_node_versions
 uninstall_opencode_and_omo
 ensure_jcode
 configure_jcode_providers
-ensure_carry
 
 # Install/update Meta CLI.
 curl -fsSL https://dev.meta.ai/install.sh | bash

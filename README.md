@@ -86,14 +86,15 @@ is skipped with a warning.
   Responses API support and Baseten per-model reasoning efforts), built with
   cargo and installed to `~/.local/bin/jcode`. Providers are configured from
   `.env`: `baseten-byok` profile (GLM-5.3 chain) when `BASETEN_API_KEY` is set.
-- **carry** (remote control daemon): cloned/built from
-  `dsingal0/remote_agent` (release profile) and installed to
-  `~/.local/bin/carry`. Runs a headless PTY daemon with built-in iroh P2P
-  pairing for the mobile app; jcode runs inside carry sessions
-  (`carry session new --cmd jcode`). Start with `carry daemon start` — it
-  prints the iroh Node ID and a 6-digit pairing code for the phone app.
 - opencode and oh-my-openagent (OmO) are fully uninstalled (binaries, config,
   data dirs) as part of the 2026-09 pivot to jcode.
+- **carry** (remote-control daemon for the phone app) is NOT auto-installed —
+  its repo is private and GitHub auth lands only after `devpod-bundle --restore`.
+  To install manually after auth is set up:
+  `git clone git@github.com:dsingal0/remote_agent.git ~/repos/remote_agent &&
+   cd ~/repos/remote_agent && cargo build --release -p carry-cli &&
+   install -m 755 target/release/carry ~/.local/bin/carry`
+  Then `carry daemon start` prints the iroh Node ID + pairing code for the app.
 
 - **droid** (Factory CLI; official curl installer, npm fallback on Linux)
 - **Factory custom models** - Baseten BYOK entries written to

@@ -1328,8 +1328,10 @@ configure_jcode_providers() {
   fi
 }
 
-# Install carry (the remote-control daemon this phone app pairs with) from
-# source. Repo expected at ~/repos/remote_agent (cloned/updated if missing).
+# Install carry (the remote-control daemon the phone app pairs with) from
+# source. NOT called by the bootstrap scripts by default (the repo is private
+# and needs GitHub auth); run manually when needed:
+#   . lib/shared.sh && ensure_carry Repo expected at ~/repos/remote_agent (cloned/updated if missing).
 # Installs both `carry` (CLI + daemon) into ~/.local/bin and prints next steps.
 ensure_carry() {
   local repo="${CARRY_REPO:-$HOME/repos/remote_agent}"
