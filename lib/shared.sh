@@ -86,7 +86,7 @@ ensure_bun() {
 
 # Ensure ~/.config/opencode/opencode.json has a `baseten` OpenAI-compatible
 # provider (https://inference.baseten.co/v1, the Baseten Model APIs) so opencode
-# and OmO can run Baseten-hosted models (GLM-5.2, Kimi-K3, DeepSeek-V4-Pro, ...).
+# and OmO can run Baseten-hosted models (GLM-5.2, DeepSeek-V4-Pro-0813, ...).
 # Reads BASETEN_API_KEY from the environment (callers source .env first). Skips
 # with a warning if the key is unset. Idempotent: merges with existing keys
 # (permission, mcp, plugin) instead of overwriting them.
@@ -128,9 +128,8 @@ cfg["provider"] = {
             "apiKey": api_key,
         },
         "models": {
-            "deepseek-ai/DeepSeek-V4-Pro": {"name": "DeepSeek V4 Pro", "limit": {"context": 200000, "output": 262144}},
+            "deepseek-ai/DeepSeek-V4-Pro-0813": {"name": "DeepSeek V4 Pro", "limit": {"context": 200000, "output": 262144}},
             "deepseek-ai/DeepSeek-V4-Flash-0731": {"name": "DeepSeek V4 Flash", "limit": {"context": 200000, "output": 262144}},
-            "moonshotai/Kimi-K3": {"name": "Kimi K3", "limit": {"context": 200000, "output": 262144}},
             "nvidia/NVIDIA-Nemotron-3-Ultra-550B-A55B": {"name": "Nemotron Ultra", "limit": {"context": 200000, "output": 202800}},
             "zai-org/GLM-5.3": {"name": "GLM 5.3", "limit": {"context": 200000, "output": 262144}},
             "zai-org/GLM-5.3-Flash": {"name": "GLM 5.3 Flash", "limit": {"context": 200000, "output": 262144}},
@@ -1071,10 +1070,9 @@ except (FileNotFoundError, json.JSONDecodeError):
 
 glm53 = "baseten/zai-org/GLM-5.3"
 glm53f = "baseten/zai-org/GLM-5.3-Flash"
+ds_pro = "baseten/deepseek-ai/DeepSeek-V4-Pro-0813"
 ds_flash = "baseten/deepseek-ai/DeepSeek-V4-Flash-0731"
 baseten_tail = [
-    "baseten/moonshotai/Kimi-K3",
-    "baseten/deepseek-ai/DeepSeek-V4-Pro",
     "baseten/nvidia/NVIDIA-Nemotron-3-Ultra-550B-A55B",
     "baseten/zai-org/GLM-5.2",
     "baseten/zai-org/GLM-5.2-Fast",
@@ -1086,8 +1084,8 @@ free_floor = [
     "openrouter/meta-llama/llama-3.3-70b-instruct:free",
     "openrouter/qwen/qwen3-32b:free",
 ]
-heavy = [glm53, glm53f, ds_flash] + baseten_tail + free_floor
-light = [glm53f, ds_flash] + baseten_tail + free_floor
+heavy = [glm53, glm53f, ds_pro, ds_flash] + baseten_tail + free_floor
+light = [glm53f, ds_pro, ds_flash] + baseten_tail + free_floor
 
 # One preset; per-agent chains. Format: presets.default.<agent> = {model: [chain]}
 cfg["presets"] = {
