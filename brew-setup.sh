@@ -18,7 +18,7 @@ brew trust basetenlabs/baseten 2>/dev/null || true
 # Packages to install and keep up to date
 # `node` provides npm, used below to install paseo.
 # `baseten` = basetenlabs/baseten-cli (https://github.com/basetenlabs/baseten-cli); `uv` for ~/venv + truss.
-FORMULAS=(baseten btop croc gh node mole pnpm rtk tmux uv)
+FORMULAS=(baseten btop croc gh node mole rtk tmux uv)
 # ghostty = terminal emulator. grok-build has no official curl installer, so it
 # stays a cask; droid / opencode install via npm below, cursor-cli via curl.
 # font-jetbrains-mono-nerd-font = JetBrains Mono with Nerd Font glyphs for TUIs.
@@ -36,19 +36,9 @@ done
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 . "$SCRIPT_DIR/lib/shared.sh"
 
-# pnpm global binaries live in $PNPM_HOME/bin; ensure that dir is on PATH for
-# the pnpm-based installs below. (`pnpm bin -g` errors out when the dir isn't
-# already on PATH, so derive it from the platform default instead.)
-case "$(uname -s)" in
-  Darwin) PNPM_HOME="${PNPM_HOME:-$HOME/Library/pnpm}" ;;
-  *)      PNPM_HOME="${PNPM_HOME:-$HOME/.local/share/pnpm}" ;;
-esac
-export PNPM_HOME
-export PATH="$PNPM_HOME/bin:$PATH"
-
-# Uninstall the npm-managed copies of packages now handled by pnpm, so no
-# stale npm binaries linger on PATH. opencode is still npm-managed (postinstall
-# must run); drop droid/paseo here so they don't shadow the pnpm/npm swap below.
+# Uninstall the npm-managed copies of packages so no stale npm binaries linger
+# on PATH. opencode is still npm-managed (postinstall
+# must run); drop droid/paseo here so they don't shadow the fresh npm installs below.
 npm uninstall -g droid @getpaseo/cli 2>/dev/null || true
 
 # 2026-09 stack: opencode v2 (@opencode-ai/cli, bin opencode2) from the beta
@@ -66,10 +56,8 @@ configure_omod_slim_presets
 curl -fsSL https://dev.meta.ai/install.sh | bash
 
 # Drop the droid binary left by the old curl installer (~/.local/bin/droid) so
-# the npm-managed binary is the one on PATH. Also remove any stale pnpm-managed
-# copy (npm always runs postinstall scripts, avoiding pnpm store-cache issues).
+# the npm-managed binary is the one on PATH.
 rm -f "$HOME/.local/bin/droid" 2>/dev/null || true
-pnpm_remove_global droid
 echo "Installing droid..."
 npm install -g droid
 droid --version 2>/dev/null || true
@@ -96,8 +84,6 @@ mkdir -p "$HOME/.local/bin"
 rm -f "$HOME/.local/bin/droid-export"
 ln -sf "$SCRIPT_DIR/bin/devpod-bundle" "$HOME/.local/bin/devpod-bundle"
 export PATH="$HOME/.local/bin:$PATH"
-
-ensure_pnpm_shell_path
 
 # Manage ~/.baseten_aliases (create if missing) and ensure the `ksh` shell helper
 # is defined. Keeps a copy in the dotfiles repo for version control.
@@ -139,7 +125,7 @@ echo "Installing cursor-cli..."
 curl -fsS https://cursor.com/install | bash
 cursor --version 2>/dev/null || true
 
-# droid is installed via pnpm above
+# droid is installed via npm above
 
 # Configure Factory: Baseten BYOK custom models (~/.factory/settings.json) and
 # FACTORY_API_KEY exported to shell rc files for the droid CLI.

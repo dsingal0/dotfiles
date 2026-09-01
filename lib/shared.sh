@@ -10,14 +10,6 @@
 # the Factory Baseten BYOK custom-models config previously inlined in both
 # bootstrap scripts.
 
-# pnpm prints [ERR_PNPM_GLOBAL_PKG_NOT_FOUND] to stdout (not stderr) when the
-# package isn't in the global store. Redirect both so idempotent uninstalls
-# stay quiet under `set -euo pipefail`.
-pnpm_remove_global() {
-  command -v pnpm >/dev/null 2>&1 || return 0
-  pnpm remove -g "$@" >/dev/null 2>&1 || true
-}
-
 # nvm node version dirs, if any. Empty when nvm isn't installed (brew-setup.sh
 # uses Homebrew node). Safe under `set -u` — never expands an unbound NVM_DIR.
 _nvm_node_version_dirs() {
@@ -51,9 +43,6 @@ uninstall_opencode_all_node_versions() {
   rmdir "$HOME/.opencode/bin" 2>/dev/null || true
   # Current npm prefix (Homebrew node, or the active nvm version). Idempotent.
   npm uninstall -g opencode-ai @opencode-ai/cli >/dev/null 2>&1 || true
-  # Any pnpm-managed copies (pnpm global store) can also shadow the npm binary.
-  pnpm_remove_global opencode-ai
-  pnpm_remove_global @opencode-ai/cli
 }
 
 # Fully uninstall oh-my-openagent (OmO) remnants — the v1-only orchestration
@@ -67,7 +56,6 @@ uninstall_opencode_and_omo() {
 
   # Package-manager copies of the plugin.
   npm uninstall -g oh-my-openagent oh-my-opencode 2>/dev/null || true
-  pnpm_remove_global oh-my-openagent oh-my-opencode
 
   # Old curl/bun installer copies.
   rm -rf "$HOME/.omo" "$HOME/.cache/oh-my-openagent" "$HOME/.config/oh-my-openagent" 2>/dev/null || true
@@ -75,78 +63,7 @@ uninstall_opencode_and_omo() {
   echo "  OmO remnants removed."
 }
 
-# Install/update opencode v1 (opencode-ai -> `opencode`) via npm.
-# See https://opencode.ai/docs. The binary is named opencode, not opencode2.
-# opencode v2 (@opencode-ai/cli -> `opencode2`) is intentionally NOT installed:
-# oh-my-openagent (OmO) is a V1 plugin — V2's plugin API is a hard break and
-# OmO has not been ported to it.
-#
-# npm is used instead of pnpm because pnpm skips postinstall scripts when it
-# reuses a cached copy from its content-addressable store. The tarball ships a
-# stub at bin/opencode.exe ("postinstall script was not run" / exit 1), and the
-# package's postinstall replaces that stub with the real platform binary. npm
-# always runs postinstall, so this entire class of pnpm store-cache bugs goes away.
-#
-# --allow-scripts=opencode-ai is required on newer npm (11.x): its
-# install-scripts security feature blocks the package's postinstall (which
-# replaces the stub bin/opencode.exe with the real platform binary) unless
-# explicitly allowed. Without it the binary stays a broken stub that errors
-# with "postinstall script was not run".
-
-# Install opencode-ai into the npm whose bin dir is $1. Returns 0 if
-# `opencode --version` then succeeds.
-_install_opencode_v1_into() {
-  local bin_dir="$1"
-  local attempt
-  for attempt in 1 2 3; do
-    if PATH="$bin_dir:$PATH" npm install -g --allow-scripts=opencode-ai opencode-ai >/dev/null 2>&1 && \
-       PATH="$bin_dir:$PATH" opencode --version >/dev/null 2>&1; then
-      echo "  opencode ready: $bin_dir"
-      return 0
-    fi
-    echo "Warning: opencode not runnable in $bin_dir (attempt $attempt/3); retrying..." >&2
-    sleep 2
-  done
-  return 1
-}
-
-install_opencode_v1() {
-  echo "Installing opencode (v1)..."
-
-  # Remove any stale pnpm-managed copy so the npm binary is the one on PATH.
-  pnpm_remove_global opencode-ai
-  pnpm_remove_global @opencode-ai/cli
-
-  # `npm install -g` only installs into the currently active node version, so
-  # the binary would be missing (or stale) in every other nvm version and shadow
-  # on PATH depending on which version a shell resolves. Install into EVERY nvm
-  # node version dir when nvm is present. brew-setup.sh uses Homebrew node and
-  # has no NVM_DIR — also install via the npm currently on PATH.
-  local node_dir bin_dir installed=0 current_bin="" skip_current=0
-  if command -v npm >/dev/null 2>&1; then
-    current_bin="$(dirname "$(command -v npm)")"
-  fi
-  while IFS= read -r node_dir; do
-    [[ -n "$node_dir" ]] || continue
-    bin_dir="$node_dir/bin"
-    [[ -n "$current_bin" && "$bin_dir" == "$current_bin" ]] && skip_current=1
-    if _install_opencode_v1_into "$bin_dir"; then
-      installed=$((installed + 1))
-    fi
-  done < <(_nvm_node_version_dirs)
-
-  if [[ "$skip_current" -eq 0 && -n "$current_bin" ]]; then
-    if _install_opencode_v1_into "$current_bin"; then
-      installed=$((installed + 1))
-    fi
-  fi
-
-  if [[ "$installed" -eq 0 ]]; then
-    echo "Warning: opencode could not be installed (continuing)" >&2
-    echo "  Fix manually: npm install -g --allow-scripts=opencode-ai opencode-ai" >&2
-  fi
-  return 0
-}
+# Persist `export <VAR>=<value>` into shell rc files (~/.bashrc always;
 
 # Ensure bun is available (oh-my-openagent's installer must run via `bunx`).
 # Prefers Homebrew on macOS; falls back to the official bun installer script.
@@ -175,6 +92,9 @@ ensure_bun() {
 # (permission, mcp, plugin) instead of overwriting them.
 #
 # The model list mirrors configure_factory_models below; opencode also
+# auto-discovers whatever else the gateway serves via /v1/models.
+# NOTE: the GLM-5.3 model chain is also pinned in configure_omod_slim_preset
+# (oh-my-opencode-slim) — update both together when models change.
 # auto-discovers whatever else the gateway serves via /v1/models.
 configure_opencode_baseten_provider() {
   if [[ -z "${BASETEN_API_KEY:-}" ]]; then
@@ -209,8 +129,11 @@ cfg["provider"] = {
         },
         "models": {
             "deepseek-ai/DeepSeek-V4-Pro": {"name": "DeepSeek V4 Pro", "limit": {"context": 200000, "output": 262144}},
+            "deepseek-ai/DeepSeek-V4-Flash-0731": {"name": "DeepSeek V4 Flash", "limit": {"context": 200000, "output": 262144}},
             "moonshotai/Kimi-K3": {"name": "Kimi K3", "limit": {"context": 200000, "output": 262144}},
             "nvidia/NVIDIA-Nemotron-3-Ultra-550B-A55B": {"name": "Nemotron Ultra", "limit": {"context": 200000, "output": 202800}},
+            "zai-org/GLM-5.3": {"name": "GLM 5.3", "limit": {"context": 200000, "output": 262144}},
+            "zai-org/GLM-5.3-Flash": {"name": "GLM 5.3 Flash", "limit": {"context": 200000, "output": 262144}},
             "zai-org/GLM-5.2": {"name": "GLM 5.2", "limit": {"context": 200000, "output": 262144}},
             "zai-org/GLM-5.2-Fast": {"name": "GLM 5.2 Fast", "limit": {"context": 200000, "output": 262144}},
         },
@@ -236,83 +159,6 @@ with open(path, "w") as f:
     f.write("\n")
 PYEOF
   echo "  opencode baseten provider configured (inference.baseten.co/v1)"
-}
-
-# Install oh-my-openagent (OmO) Ultimate for OpenCode v1 and point every OmO
-# agent/category at the intelligence-ordered model chain (GLM-5.3 first, down
-# to free OpenCode/OpenRouter models).
-#
-# Requires bun and BASETEN_API_KEY (from .env). Idempotent: the OmO installer is
-# safe to re-run, and the omo.jsonc step rewrites only the [opencode] block.
-# Pass the repo root as $1 (for .env loading).
-install_opencode_omo() {
-  local repo_dir="$1"
-  load_env_file "$repo_dir"
-
-  if ! ensure_bun; then
-    echo "WARNING: skipping oh-my-openagent install (bun missing)." >&2
-    return 0
-  fi
-
-  echo "Installing oh-my-openagent (OmO) for opencode..."
-  bunx --yes oh-my-openagent install \
-    --no-tui --platform=opencode \
-    --claude=no --openai=yes --gemini=no --copilot=no \
-    --opencode-zen=no --zai-coding-plan=no --opencode-go=no \
-    --kimi-for-coding=no --bailian-coding-plan=no \
-    --minimax-cn-coding-plan=no --minimax-coding-plan=no \
-    --vercel-ai-gateway=no --skip-auth \
-    || echo "WARNING: oh-my-openagent install reported errors (continuing)." >&2
-
-  configure_opencode_baseten_provider
-
-  # Point every OmO agent/category at the intelligence-ordered model chain:
-  # GLM-5.3 -> GLM-5.3-Flash -> DeepSeek V4 Pro 0813 -> DeepSeek V4 Flash 0731
-  # -> Meta Muse 1.2 Contributor -> free OpenCode Zen models -> free OpenRouter
-  # models. Models resolve through opencode providers (baseten/meta are built in
-  # or configured above; openrouter is dormant until OPENROUTER_API_KEY is set).
-  BASETEN_API_KEY="${BASETEN_API_KEY:-}" python3 - << 'PYEOF'
-import json, os
-
-path = os.path.expanduser("~/.omo/omo.jsonc")
-try:
-    raw = open(path).read()
-except FileNotFoundError:
-    raw = ""
-
-# Strip leading // comment lines so json.loads can parse the JSONC.
-lines = [ln for ln in raw.splitlines() if not ln.lstrip().startswith("//")]
-try:
-    data = json.loads("\n".join(lines)) if "\n".join(lines).strip() else {}
-except json.JSONDecodeError:
-    data = {}
-
-B, M, Z, OR = "baseten", "meta", "opencode", "openrouter"
-CHAIN = [
-    f"{B}/zai-org/GLM-5.3",                       # 1. best
-    f"{B}/zai-org/GLM-5.3-Flash",                 # 2.
-    f"{B}/deepseek-ai/DeepSeek-V4-Pro-0813",      # 3.
-    f"{B}/deepseek-ai/DeepSeek-V4-Flash-0731",    # 4.
-    f"{M}/muse-spark-1.2-contributor",            # 5. Meta Muse 1.2 Contributor
-    f"{Z}/muse-spark-1.2-contributor-free",       # 6. free opencode
-    f"{Z}/nemotron-3-ultra-free",
-    f"{Z}/ling-3.0-flash-fin-free",
-    f"{OR}/deepseek/deepseek-chat:free",          # 7. free openrouter (needs key)
-]
-primary = CHAIN[0]
-fallbacks = [{"model": m} for m in CHAIN[1:]]
-
-block = data.setdefault("[opencode]", {})
-for group in ("agents", "categories"):
-    for name in block.setdefault(group, {}):
-        block[group][name] = {"model": primary, "fallback_models": fallbacks}
-
-block["$schema"] = "https://raw.githubusercontent.com/code-yeongyu/oh-my-openagent/dev/assets/omo.schema.json"
-data["[opencode]"] = block
-with open(path, "w") as f:
-    f.write("// OMO configuration\n" + json.dumps(data, indent=2) + "\n")
-PYEOF
-  echo "  OmO agents/categories wired to the intelligence-ordered model chain."
 }
 
 # Ensure ~/.config/opencode/opencode.json has permission: allow (merged with
@@ -600,53 +446,6 @@ PYEOF
   done
 }
 
-# Persist PNPM_HOME and $PNPM_HOME/bin on PATH in shell rc files. pnpm global
-# installs (opencode, droid, paseo) land in $PNPM_HOME/bin; setup scripts export
-# that for the current run but new shells need this block to find those CLIs.
-ensure_pnpm_shell_path() {
-  local pnpm_home
-  case "$(uname -s)" in
-    Darwin) pnpm_home="$HOME/Library/pnpm" ;;
-    *)      pnpm_home="$HOME/.local/share/pnpm" ;;
-  esac
-  local rc_files=( "$HOME/.bashrc" )
-  [[ -f "$HOME/.zshrc" ]] && rc_files+=( "$HOME/.zshrc" )
-  local rc
-  for rc in "${rc_files[@]}"; do
-    touch "$rc"
-    PNPM_HOME_VALUE="$pnpm_home" python3 - "$rc" << 'PYEOF'
-import os, re, sys
-
-path = sys.argv[1]
-pnpm_home = os.environ["PNPM_HOME_VALUE"]
-open_m = "# >>> pnpm global bins (managed by dotfiles setup) >>>"
-close_m = "# <<< pnpm global bins <<<"
-block = (
-    "%s\n"
-    "export PNPM_HOME=\"%s\"\n"
-    "case \":$PATH:\" in\n"
-    "  *\":$PNPM_HOME/bin:\"*) ;;\n"
-    "  *) export PATH=\"$PNPM_HOME/bin:$PATH\" ;;\n"
-    "esac\n"
-    "%s"
-) % (open_m, pnpm_home.replace("\\", "\\\\").replace('"', '\\"'), close_m)
-try:
-    with open(path) as f:
-        content = f.read()
-except FileNotFoundError:
-    content = ""
-pat = re.compile(r"\n?" + re.escape(open_m) + r".*?" + re.escape(close_m) + r"\n?", re.DOTALL)
-content = pat.sub("\n", content)
-content = content.rstrip()
-if content:
-    content += "\n\n"
-content += block + "\n"
-with open(path, "w") as f:
-    f.write(content)
-PYEOF
-  done
-}
-
 # One-shot Factory configuration shared by both bootstrap scripts:
 #   1. load .env (BASETEN_API_KEY, FACTORY_API_KEY)
 #   2. write Baseten BYOK custom models into ~/.factory/settings.json
@@ -857,10 +656,10 @@ PYEOF
   echo "Removing excluded pack skills: ${names[*]}"
   # NOTE: skill names must precede the -a flags; the skills CLI's remove parser
   # greedily consumes every non-flag arg after -a as an agent name.
-  pnpm dlx skills@latest remove -g -y \
-    "${names[@]}" \
-    -a universal -a droid -a opencode -a cursor \
-    || echo "WARNING: skill removal reported errors (continuing)."
+    npx --yes skills@latest remove -g -y \
+      "${names[@]}" \
+      -a universal -a droid -a opencode -a cursor \
+      || echo "WARNING: skill removal reported errors (continuing)."
 }
 
 # Install third-party skill packs globally via the skills.sh CLI (npx skills).
@@ -891,8 +690,8 @@ install_skill_packages() {
   local include_emilkowalski="${1:-false}"
   local include_expo="${2:-true}"
 
-  if ! command -v pnpm >/dev/null 2>&1; then
-    echo "WARNING: pnpm not found; skipping third-party skill packages."
+  if ! command -v npx >/dev/null 2>&1; then
+    echo "WARNING: npx not found; skipping third-party skill packages."
     return 0
   fi
 
@@ -931,7 +730,7 @@ install_skill_packages() {
   for pack in "${packs[@]}"; do
     echo "Installing skill pack: $pack (global)..."
     # --full-depth: mattpocock nests skills under engineering/productivity/etc.
-    pnpm dlx skills@latest add "$pack" -g -y --skill '*' --full-depth \
+    npx --yes skills@latest add "$pack" -g -y --skill '*' --full-depth \
       "${agent_args[@]}" \
       || echo "WARNING: skill pack install reported errors for $pack (continuing)."
   done
@@ -1041,12 +840,16 @@ install_baseten_cli() {
       ;;
   esac
 
-  # Resolve latest release tag via GitHub API; fall back to a known good version.
+  # Resolve latest release tag via GitHub API; skip with a warning if the
+  # fetch fails rather than silently installing a stale pinned release.
   local tag
   tag="$(curl -fsSL https://api.github.com/repos/basetenlabs/baseten-cli/releases/latest \
     | python3 -c 'import sys,json; print(json.load(sys.stdin)["tag_name"])' 2>/dev/null \
     || true)"
-  tag="${tag:-v0.2.0}"
+  if [[ -z "$tag" ]]; then
+    echo "WARNING: could not resolve the latest baseten-cli release tag; skipping baseten CLI install."
+    return 0
+  fi
   local ver="${tag#v}"
   asset="baseten_${ver}_${os}_${arch}.tar.gz"
   url="https://github.com/basetenlabs/baseten-cli/releases/download/${tag}/${asset}"
@@ -1131,12 +934,16 @@ ensure_croc() {
       ;;
   esac
 
-  # Resolve latest release tag via GitHub API; fall back to a known good version.
+  # Resolve latest release tag via GitHub API; skip with a warning if the
+  # fetch fails rather than silently installing a stale pinned release.
   local tag
   tag="$(curl -fsSL https://api.github.com/repos/schollz/croc/releases/latest \
     | python3 -c 'import sys,json; print(json.load(sys.stdin)["tag_name"])' 2>/dev/null \
     || true)"
-  tag="${tag:-v11.0.1}"
+  if [[ -z "$tag" ]]; then
+    echo "WARNING: could not resolve the latest croc release tag; skipping croc install."
+    return 0
+  fi
   local ver="${tag#v}"
   asset="croc_v${ver}_${os}-${arch}.tar.gz"
   url="https://github.com/schollz/croc/releases/download/${tag}/${asset}"
@@ -1257,6 +1064,8 @@ except (FileNotFoundError, json.JSONDecodeError):
     cfg = {}
 # Only set the preset if it's missing or still the default "openai" —
 # don't clobber a user-chosen preset on re-runs.
+# NOTE: the GLM-5.3 model chain here must mirror the models dict in
+# configure_opencode_baseten_provider — update both together.
 if cfg.get("preset") not in ("baseten", "baseten-fast"):
     cfg["preset"] = "baseten"
     cfg["presets"] = {

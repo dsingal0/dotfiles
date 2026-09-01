@@ -9,8 +9,8 @@ Three platform bootstrap scripts share a common config layer in `lib/shared.sh`:
 - **`setup-arch.sh`** - Arch Linux (pacman + paru/AUR).
 - **`brew-setup.sh`** - macOS (Homebrew).
 
-Both are idempotent: re-run them to install or update tools on an existing
-machine. Run the one for your platform.
+All three are idempotent: re-run them to install or update tools on an
+existing machine. Run the one for your platform.
 
 ## Setup
 
@@ -28,52 +28,56 @@ cd ~/dotfiles
 ./brew-setup.sh
 ```
 
-### Baseten API key (used by jcode, droid, and OpenAI-compatible tooling)
+### Baseten API key (used by droid, opencode, and Factory custom models)
 
-Wires Baseten-hosted models into jcode (the `baseten-byok` provider profile, default model GLM-5.3), Factory droid custom models, and OpenRouter-compatible tooling. Provide an API key:
+Wires Baseten-hosted models into Factory droid custom models
+(`~/.factory/settings.json`) and the opencode Baseten provider
+(`~/.config/opencode/opencode.json`). Provide an API key:
 
 ```bash
 cp .env.example .env
 # edit .env and set BASETEN_API_KEY=...
-./setup.sh   # or ./brew-setup.sh
+./setup.sh   # or ./brew-setup.sh / ./setup-arch.sh
 ```
+
+Without a key, the relevant step is skipped with a warning.
 
 ### Factory API key (optional)
 
 `FACTORY_API_KEY` authenticates the `droid` CLI via an env var instead of the
 default OAuth file (`~/.factory/auth.v2.file`). When set in `.env`, the setup
 script persists `export FACTORY_API_KEY=...` into `~/.bashrc` (and `~/.zshrc` if
-present) inside a managed block, so:
+present), so:
 
 - **new shells** get it automatically,
 - **existing shells** need `source ~/.bashrc` (or a new terminal).
 
-Leave it blank to keep using OAuth.
-
-Both keys are gitignored and never committed. Without a key, the relevant step
-is skipped with a warning.
+Both keys are gitignored and never committed.
 
 ## Repository layout
 
 ```
 .
-├── setup.sh           # Linux bootstrap (apt, nvm, rust, jcode, carry, droid, ...)
+├── setup.sh           # Linux bootstrap (apt, nvm, rust, droid, opencode v2, ...)
 ├── setup-arch.sh      # Arch Linux bootstrap (pacman + paru/AUR, same toolchain)
 ├── brew-setup.sh      # macOS bootstrap (Homebrew formulae + casks)
 ├── lib/
-│   └── shared.sh      # sourced by all bootstraps: jcode + carry installers,
-│                       #   opencode/OmO removal, Baseten provider config
-├── config/               # per-harness configs (opencode removed 2026-09)
-├── tmux.conf          # tmux config symlinked to ~/.tmux.conf
+│   └── shared.sh      # sourced by all bootstraps: opencode v2 + omod-slim
+│                      #   installers, Baseten provider config, skills, runlayer MCP
 ├── bin/
-│   ├── droid-export   # export a Factory "droid" session to JSONL / markdown
-│   ├── devpod-bundle  # pack/restore SSH + opencode/factory/cursor/grok CLI
-│   │                   #   auth+settings for croc Mac <-> dev pod
-│   └── droid-to-opencode  -> droid-export   (compat symlink)
-├── devpod-bundle      -> bin/devpod-bundle  (run from repo root on any host)
-├── skills/            # Factory skill definitions (SKILL.md per skill)
+│   └── devpod-bundle  # pack/restore SSH + opencode/factory/cursor/grok/truss
+│                      #   auth+settings for Mac <-> dev pod sync
+├── devpod-bundle -> bin/devpod-bundle   (run from repo root on any host)
+├── clone_runtimes.sh  # shallow-clone the Baseten/vLLM/TensorRT-LLM repos into ~/repos
+├── config/
+│   └── opencode/
+│       └── AGENTS.md  # global opencode rules, symlinked into ~/.config/opencode
+├── skills/            # personal skills, symlinked into every agent harness
 ├── baseten_aliases    # kubectl / shell aliases for the baseten monorepo
-├── .env.example       # template for BASETEN_API_KEY
+├── tmux.conf          # symlinked to ~/.tmux.conf
+├── ghostty.conf       # symlinked to ~/.config/ghostty/config (macOS)
+├── .env.example       # template for BASETEN_API_KEY / FACTORY_API_KEY
+├── dsingal-dev-pod-b300.yaml  # dev pod spec
 └── README.md
 ```
 
@@ -81,48 +85,38 @@ is skipped with a warning.
 
 ### Both platforms (via `lib/shared.sh`)
 
-- **jcode** (primary coding agent): cloned/updated from the `dsingal0/jcode`
-  fork (branch `feat/responses-api-and-baseten-reasoning` — adds OpenAI
-  Responses API support and Baseten per-model reasoning efforts), built with
-  cargo and installed to `~/.local/bin/jcode`. Providers are configured from
-  `.env`: `baseten-byok` profile (GLM-5.3 chain) when `BASETEN_API_KEY` is set.
-- opencode and oh-my-openagent (OmO) are fully uninstalled (binaries, config,
-  data dirs) as part of the 2026-09 pivot to jcode.
-- **carry** (remote-control daemon for the phone app) is NOT auto-installed —
-  its repo is private and GitHub auth lands only after `devpod-bundle --restore`.
-  To install manually after auth is set up:
-  `git clone git@github.com:dsingal0/remote_agent.git ~/repos/remote_agent &&
-   cd ~/repos/remote_agent && cargo build --release -p carry-cli &&
-   install -m 755 target/release/carry ~/.local/bin/carry`
-  Then `carry daemon start` prints the iroh Node ID + pairing code for the app.
-
-- **droid** (Factory CLI; official curl installer, npm fallback on Linux)
-- **Factory custom models** - Baseten BYOK entries written to
-  `~/.factory/settings.json` (requires `BASETEN_API_KEY`)
-- **FACTORY_API_KEY** - persisted to shell rc files so the `droid` CLI reads it
-  from the environment (alternative to OAuth; requires `FACTORY_API_KEY`)
-- **CURSOR_API_KEY** - `~/.cursor/env` (mode 600, not in this repo) sourced by
-  shell rc files; legacy (the current `cursor-agent` binary does not read it).
-  Real cursor auth is file-based via `AGENT_CLI_CREDENTIAL_STORE=file`
-  (`~/.cursor/auth.json` on macOS, `~/.config/cursor/auth.json` on Linux),
-  carried to dev pods by `devpod-bundle`
-- tmux config symlinked to `~/.tmux.conf`
-- **~/venv** (via `uv`) with **truss** (Baseten model authoring / deploy-loop)
-  and **magic-wormhole** (file transfer); `wormhole` symlinked to `~/.local/bin`
-- **croc** (file transfer) - brew formula on macOS,
-  GitHub release binary into `~/.local/bin` on Linux
+- **opencode v2** (`@opencode-ai/cli`, bin `opencode2`) plus the
+  **oh-my-opencode-slim** orchestration plugin, with the Baseten provider
+  written to `~/.config/opencode/opencode.json` (requires `BASETEN_API_KEY`).
+  Stale v1 / OmO copies across all nvm node version dirs are removed first.
+- **droid** (Factory CLI) via npm, with Baseten BYOK custom models written to
+  `~/.factory/settings.json` (requires `BASETEN_API_KEY`).
+- **FACTORY_API_KEY** and **FACTORY_DISABLE_KEYRING=1** persisted to shell rc
+  files so droid stores auth in the portable `~/.factory/auth.v2.file` +
+  `auth.v2.key` pair instead of the macOS login keychain.
+- **runlayer MCP** configured in opencode, droid, and cursor.
+- **git identity** (name + email) configured globally.
+- **rtk** (Rust Token Killer - LLM token proxy), initialized for opencode
+  (plugin) and Cursor (preToolUse hook). Note: rtk has no native
+  Droid/Factory integration; Droid is not wired here.
+- **~/venv** (via `uv`) with **truss** (Baseten model authoring / deploy-loop).
+- Personal skills from the repo's `skills/` directory, symlinked into every
+  harness (`~/.factory/skills/`, `~/.config/opencode/skills/`,
+  `~/.cursor/skills/`, and `~/.grok/skills/` on macOS). Design skills
+  (`frontend-design`) are skipped on Linux dev pods and installed only by
+  `brew-setup.sh`.
 
 ### Linux (`setup.sh`)
 
 - **btop**, tree, build-essential, libclang-dev (best-effort via apt)
-- **tmux** (distro package)
-- **nvm** + Node.js 26
-- **gh** (GitHub CLI, via webi)
+- **tmux** (distro package), config symlinked to `~/.tmux.conf`
+- **nvm** + latest Node.js (`nvm install node`, never pinned)
+- **gh** (GitHub CLI, via GitHub's official apt repo)
 - **uv** (Python package manager)
 - **Rust** / Cargo (+ `LIBCLANG_PATH` for bindgen)
-- **rtk** (Rust Token Killer - LLM token proxy), with hooks for opencode + Cursor
-- git identity (name + email) configured globally
-- `bin/droid-export` and `bin/devpod-bundle` symlinked into `~/.local/bin`
+- **rtk** (curl installer)
+- **croc** (file transfer, GitHub release binary)
+- **Meta CLI**
 
 ### Arch Linux (`setup-arch.sh`)
 
@@ -133,22 +127,20 @@ apt:
   **tmux**, **gh** (as `github-cli`), **croc**, **uv** (best-effort via pacman)
 - **paru** (AUR helper, built from the AUR if missing)
 - **rtk** (via AUR `rtk-bin`, falling back to the official curl installer)
-- everything else (nvm + Node.js 26, pnpm, droid, jcode, Rust/Cargo,
-  Cursor CLI, skills, Baseten CLI, truss venv) installs exactly as in `setup.sh`
 
 ### macOS (`brew-setup.sh`)
 
-- Homebrew formulae: `baseten croc gh node mole rtk tmux uv`
-- Homebrew casks: `brave-browser@beta grok-build ghostty font-jetbrains-mono-nerd-font`
+- Homebrew formulae: `baseten btop croc gh node mole rtk tmux uv`
+- Homebrew casks: `brave-browser@beta ghostty font-jetbrains-mono-nerd-font grok-build`
+- **droid** (npm) and **cursor-cli** (official curl installer)
 - `~/.baseten_aliases` created if missing; the managed `ksh` shell helper is
   (re)written and a copy kept in the repo for version control
-- **droid** (npm), **cursor-cli** (official curl installer)
-- **jcode** and **carry** built from source (see above)
+- `brew cleanup --prune=all` at the end
+
 ## tmux config (`tmux.conf`)
 
-Tuned for running TUI agents (jcode, Droid, Claude Code) inside tmux,
-including over SSH to remote pods. Symlinked to `~/.tmux.conf` by both setup
-scripts. Highlights:
+Tuned for running TUI agents (opencode, droid) inside tmux, including over SSH
+to remote pods. Symlinked to `~/.tmux.conf` by both setup scripts. Highlights:
 
 - **mouse on** - wheel events pass through to mouse-tracking TUIs
 - **extended-keys** with CSI-u (tmux 3.3+ guarded, so 3.2a doesn't error)
@@ -159,56 +151,26 @@ scripts. Highlights:
 - **renumber-windows on** - compact window numbers
 - **set-clipboard on** - OSC 52 clipboard passthrough to the local machine over SSH
 
-## droid-export (`bin/droid-export`)
+## droid-export
 
 Export a Factory "droid" session transcript to a portable, harness-agnostic
-format. It only **reads** the droid session JSONL and writes the export - it
-performs no writes to opencode (or any other harness's session store), so the
-output can be ingested by any downstream agent by simply reading the file.
-
-A droid session lives at
-`~/.factory/sessions/<encoded-cwd>/<session-id>.jsonl`.
-
-```bash
-droid-export last                       # JSONL to stdout
-droid-export <session-id> -o out.jsonl  # JSONL to file
-droid-export <id> --format md           # markdown to stdout
-droid-export <id> --format md -o out.md # markdown to file
-droid-export --list                     # list droid sessions
-```
-
-### JSONL schema
-
-One JSON object per line. The first line is a `meta` record; the rest are
-`message` or `todos` records.
-
-```jsonl
-{"type":"meta","exporter":"droid-export","version":2,"droidSessionId":"...","cwd":"...","title":"...","exportedAt":"..."}
-{"type":"message","role":"user","id":"...","timestamp":"...","parent":null,"blocks":[{"type":"text","text":"..."}]}
-{"type":"message","role":"assistant","id":"...","timestamp":"...","parent":"...","blocks":[{"type":"reasoning","text":"..."},{"type":"tool_use","id":"...","name":"Execute","input":{...}},{"type":"tool_result","toolUseId":"...","isError":false,"content":"..."}]}
-{"type":"todos","timestamp":"...","todos":[{"label":"...","status":"completed"}]}
-```
-
-Block types: `text`, `reasoning`, `tool_use` (with original droid tool name +
-input), `tool_result`. System-reminder noise blocks are dropped.
-
-`bin/droid-to-opencode` is a symlink to `droid-export` kept for compatibility.
+format. A droid session lives at `~/.factory/sessions/<encoded-cwd>/<session-id>.jsonl`.
 
 ## devpod-bundle (`bin/devpod-bundle`)
 
-Pack the auth + settings for SSH, opencode, Factory droid, Cursor CLI,
-grok CLI, and truss (Baseten) into one tar.gz, croc it to a dev pod, and
-restore it there - so you only stay logged in on one machine (your Mac).
+Pack the auth + settings for SSH, opencode, Factory droid, Cursor CLI, grok
+CLI, and truss (Baseten) into one tar.gz, croc it to a dev pod, and restore it
+there - so you only stay logged in on one machine (your Mac).
 
 Paths in the archive are relative to `$HOME`, so restore works on any pod
 regardless of username.
 
 **Cursor CLI** auth is file-based: set `AGENT_CLI_CREDENTIAL_STORE=file` so
 `cursor-agent` writes `~/.cursor/auth.json` on macOS (and reads
-`~/.config/cursor/auth.json` on Linux) instead of the macOS Keychain. That file
-IS bundled; on restore it is copied to `~/.config/cursor/auth.json` on Linux.
+`~/.config/cursor/auth.json` on Linux). That file IS bundled; on restore it is
+copied to `~/.config/cursor/auth.json` on Linux.
 `~/.cursor/env` (`CURSOR_API_KEY`) is also bundled and sourced by shell rc, but
-it is legacy — the current `cursor-agent` binary does not read `CURSOR_API_KEY`.
+it is legacy - the current `cursor-agent` binary does not read `CURSOR_API_KEY`.
 
 **Factory droid** auth is file-based too: set `FACTORY_DISABLE_KEYRING=1` so
 droid writes the portable `~/.factory/auth.v2.file` + `auth.v2.key` pair instead
@@ -218,16 +180,6 @@ Linux). The `auth.v2.file`/`auth.v2.key` pair IS bundled. The factory mTLS cert
 `factory login` on the pod if it has expired. Truss (Baseten) credentials
 (`~/.trussrc`) are bundled too; re-run `truss login` on the pod if a remote
 needs re-auth.
-
-> **One-time migration on the Mac** (to get out of the keychain): in a new shell
-> (after setup has exported the env vars) re-login so the portable files are
-> written:
-> ```bash
-> AGENT_CLI_CREDENTIAL_STORE=file agent auth login   # writes ~/.cursor/auth.json
-> FACTORY_DISABLE_KEYRING=1 droid login              # writes ~/.factory/auth.v2.file + auth.v2.key
-> ```
-> After that, `devpod-bundle --list` should show both files as bundled (not
-> "missing").
 
 ```bash
 # On the Mac (the machine you stay logged in on):
@@ -244,9 +196,8 @@ croc send ~/devpod-bundle-*.tar.gz
 
 ## Notes
 
-- The only coding harnesses installed are **opencode** (installed first),
-  **droid** (Factory CLI), **cursor-cli**, and **grok-build** (macOS only).
-  Official curl installers are preferred over package managers; grok-build has
-  no curl installer, so it stays a Homebrew cask.
-- rtk has no native Droid/Factory integration; it is wired for opencode (plugin)
-  and Cursor (preToolUse hook) only.
+- The only coding harnesses installed are **opencode v2**, **droid**
+  (Factory CLI), **cursor-cli**, and **grok-build** (macOS only, Homebrew
+  cask - it has no curl installer).
+- Herdr bash completions are regenerated on Linux if `herdr` is present
+  (Herdr itself is installed out-of-band).

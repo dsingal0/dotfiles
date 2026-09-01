@@ -73,7 +73,7 @@ rm -f "$HOME/.local/bin/droid-export"
 ln -sf "$SCRIPT_DIR/bin/devpod-bundle" "$HOME/.local/bin/devpod-bundle"
 
 # Download and install/update nvm:
-curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.4/install.sh | bash
+curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/master/install.sh | bash
 
 # Ensure nvm init lines are in .bashrc (the installer sometimes fails to add them)
 append_once "$HOME/.bashrc" 'export NVM_DIR="$HOME/.nvm"'
@@ -82,34 +82,12 @@ append_once "$HOME/.bashrc" '[ -s "$NVM_DIR/nvm.sh" ] && \. "$NVM_DIR/nvm.sh"'
 # in lieu of restarting the shell
 \. "$HOME/.nvm/nvm.sh"
 
-# Download and install/update Node.js:
-nvm install 26
-nvm use 26
+# Download and install/update Node.js (latest release):
+nvm install node
+nvm use node
 
 # Verify the Node.js version:
-node -v # Should print "v26.2.0".
-
-# Verify npm version:
-npm -v # Should print "11.13.0".
-
-# Install/update pnpm (npm's faster replacement; corepack is no longer bundled
-# with Node 25+, so bootstrap pnpm itself via npm).
-npm install -g pnpm
-# Ensure pnpm global binaries are on PATH for the rest of this script.
-# (`pnpm bin -g` errors out when the dir isn't already on PATH, so derive it
-# from the platform default instead.)
-case "$(uname -s)" in
-  Darwin) PNPM_HOME="${PNPM_HOME:-$HOME/Library/pnpm}" ;;
-  *)      PNPM_HOME="${PNPM_HOME:-$HOME/.local/share/pnpm}" ;;
-esac
-export PNPM_HOME
-export PATH="$PNPM_HOME/bin:$PATH"
-ensure_pnpm_shell_path
-
-# Uninstall the npm-managed copies of packages now handled by pnpm, so no
-# stale npm binaries linger on PATH. opencode is still npm-managed (postinstall
-# must run); drop droid/paseo here so they don't shadow the npm reinstall below.
-npm uninstall -g droid @getpaseo/cli 2>/dev/null || true
+node -v # Should print the latest Node.js release.
 
 # 2026-09 stack: opencode v2 (@opencode-ai/cli, bin opencode2) from the beta
 # channel + oh-my-opencode-slim (agent orchestration plugin). jcode/carry are
@@ -127,13 +105,9 @@ curl -fsSL https://dev.meta.ai/install.sh | bash
 
 configure_runlayer_mcp
 
-# Install droid (Factory CLI) via pnpm - the official curl installer lags the
-# npm release (it's pinned to an older version), so pnpm gets the latest.
-# Drop the droid binary left by the old curl installer (~/.local/bin/droid) so
-# the npm-managed binary is the one on PATH. Also remove any stale pnpm-managed
-# copy (npm always runs postinstall scripts, avoiding pnpm store-cache issues).
+# Install droid (Factory CLI) - npm always runs postinstall scripts, so the
+# npm-managed install is the reliable one.
 rm -f "$HOME/.local/bin/droid" 2>/dev/null || true
-pnpm_remove_global droid
 echo "Installing droid..."
 npm install -g droid
 
@@ -174,7 +148,6 @@ curl https://cursor.com/install -fsS | bash
 
 # Install/update paseo (pre-release track via the `beta` dist-tag)
 echo "Installing paseo..."
-pnpm_remove_global @getpaseo/cli
 npm install -g @getpaseo/cli@beta
 # Bare `paseo` runs onboard and prompts for relay pairing + voice on a TTY.
 # --no-relay skips device pairing; --voice disable skips voice model downloads.
