@@ -109,10 +109,7 @@ ensure_pnpm_shell_path
 # Uninstall the npm-managed copies of packages now handled by pnpm, so no
 # stale npm binaries linger on PATH. opencode is still npm-managed (postinstall
 # must run); drop droid/paseo here so they don't shadow the npm reinstall below.
-# paseo removed 2026-09 (will be replaced by carry); drop stale copies.
 npm uninstall -g droid @getpaseo/cli 2>/dev/null || true
-pnpm_remove_global @getpaseo/cli
-rm -f "$HOME/.local/bin/paseo" 2>/dev/null || true
 
 # 2026-09 stack: opencode v2 (@opencode-ai/cli, bin opencode2) from the beta
 # channel + oh-my-opencode-slim (agent orchestration plugin). jcode/carry are
@@ -173,6 +170,14 @@ fi
 # Install/update Cursor CLI
 echo "Installing Cursor CLI..."
 curl https://cursor.com/install -fsS | bash
+
+# Install/update paseo (pre-release track via the `beta` dist-tag)
+echo "Installing paseo..."
+pnpm_remove_global @getpaseo/cli
+npm install -g @getpaseo/cli@beta
+# Bare `paseo` runs onboard and prompts for relay pairing + voice on a TTY.
+# --no-relay skips device pairing; --voice disable skips voice model downloads.
+paseo onboard --no-relay --voice disable
 
 # Install/update rtk (Rust Token Killer) - CLI proxy that cuts LLM token usage.
 # Installed from the AUR (rtk-bin = prebuilt binary) via paru; falls back to the
