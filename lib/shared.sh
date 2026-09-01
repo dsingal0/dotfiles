@@ -1243,8 +1243,7 @@ plugins.append("oh-my-opencode-slim")
 cfg["plugin"] = plugins
 with open(path, "w") as f:
     json.dump(cfg, f, indent=2)
-    f.write("
-")
+    f.write("\n")
 print("  slim registered (unpinned, tracks latest)")
 PYEOF
   echo "  oh-my-opencode-slim installed."
