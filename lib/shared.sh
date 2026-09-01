@@ -56,30 +56,23 @@ uninstall_opencode_all_node_versions() {
   pnpm_remove_global @opencode-ai/cli
 }
 
-# Fully uninstall oh-my-openagent (OmO) and oh-my-opencode-slim remnants plus
-# all opencode config/data dirs. Idempotent. Complements
-# uninstall_opencode_all_node_versions (which handles the binaries).
+# Fully uninstall oh-my-openagent (OmO) remnants — the v1-only orchestration
+# plugin. Does NOT touch opencode v2's config or credentials (those live in
+# ~/.config/opencode and ~/.local/share/opencode and belong to the running v2
+# install). Idempotent.
 uninstall_opencode_and_omo() {
-  echo "Removing OmO / slim configs and opencode data dirs..."
-  # Kill lingering processes first.
-  pkill -f "opencode" 2>/dev/null || true
+  echo "Removing OmO (v1 orchestration plugin) remnants..."
+  # Kill lingering processes.
   pkill -f "oh-my-open" 2>/dev/null || true
-  pkill -f "omo" 2>/dev/null || true
 
-  # Package-manager copies of the plugins.
-  npm uninstall -g oh-my-openagent oh-my-opencode oh-my-opencode-slim 2>/dev/null || true
-  pnpm_remove_global oh-my-openagent oh-my-opencode oh-my-opencode-slim
+  # Package-manager copies of the plugin.
+  npm uninstall -g oh-my-openagent oh-my-opencode 2>/dev/null || true
+  pnpm_remove_global oh-my-openagent oh-my-opencode
 
   # Old curl/bun installer copies.
   rm -rf "$HOME/.omo" "$HOME/.cache/oh-my-openagent" "$HOME/.config/oh-my-openagent" 2>/dev/null || true
 
-  # opencode config + data dirs (fresh v2 setup recreates them).
-  rm -rf "$HOME/.config/opencode" \
-         "$HOME/.local/share/opencode" \
-         "$HOME/.cache/opencode" \
-         "$HOME/.local/state/opencode" 2>/dev/null || true
-
-  echo "  OmO/slim remnants and opencode data dirs removed."
+  echo "  OmO remnants removed."
 }
 
 # Install/update opencode v1 (opencode-ai -> `opencode`) via npm.
@@ -1262,32 +1255,36 @@ try:
         cfg = json.load(f)
 except (FileNotFoundError, json.JSONDecodeError):
     cfg = {}
-cfg["preset"] = "baseten"
-cfg["presets"] = {
-    "baseten": {
-        "orchestrator": {"model": "baseten/zai-org/GLM-5.3"},
-        "oracle": {"model": "baseten/zai-org/GLM-5.3"},
-        "council": {"model": "baseten/zai-org/GLM-5.3"},
-        "librarian": {"model": "baseten/zai-org/GLM-5.3-Flash"},
-        "designer": {"model": "baseten/zai-org/GLM-5.3"},
-        "fixer": {"model": "baseten/zai-org/GLM-5.3-Flash"},
-        "explorer": {"model": "baseten/zai-org/GLM-5.3-Flash"},
-    },
-    "baseten-fast": {
-        "orchestrator": {"model": "baseten/zai-org/GLM-5.3-Flash"},
-        "oracle": {"model": "baseten/zai-org/GLM-5.3-Flash"},
-        "council": {"model": "baseten/zai-org/GLM-5.3-Flash"},
-        "librarian": {"model": "baseten/deepseek-ai/DeepSeek-V4-Flash-0731"},
-        "designer": {"model": "baseten/zai-org/GLM-5.3-Flash"},
-        "fixer": {"model": "baseten/zai-org/GLM-5.3-Flash"},
-        "explorer": {"model": "baseten/deepseek-ai/DeepSeek-V4-Flash-0731"},
-    },
-}
-with open(path, "w") as f:
-    json.dump(cfg, f, indent=2)
-    f.write("
-")
-print("  slim preset set to baseten (GLM-5.3 chain)")
+# Only set the preset if it's missing or still the default "openai" —
+# don't clobber a user-chosen preset on re-runs.
+if cfg.get("preset") not in ("baseten", "baseten-fast"):
+    cfg["preset"] = "baseten"
+    cfg["presets"] = {
+        "baseten": {
+            "orchestrator": {"model": "baseten/zai-org/GLM-5.3"},
+            "oracle": {"model": "baseten/zai-org/GLM-5.3"},
+            "council": {"model": "baseten/zai-org/GLM-5.3"},
+            "librarian": {"model": "baseten/zai-org/GLM-5.3-Flash"},
+            "designer": {"model": "baseten/zai-org/GLM-5.3"},
+            "fixer": {"model": "baseten/zai-org/GLM-5.3-Flash"},
+            "explorer": {"model": "baseten/zai-org/GLM-5.3-Flash"},
+        },
+        "baseten-fast": {
+            "orchestrator": {"model": "baseten/zai-org/GLM-5.3-Flash"},
+            "oracle": {"model": "baseten/zai-org/GLM-5.3-Flash"},
+            "council": {"model": "baseten/zai-org/GLM-5.3-Flash"},
+            "librarian": {"model": "baseten/deepseek-ai/DeepSeek-V4-Flash-0731"},
+            "designer": {"model": "baseten/zai-org/GLM-5.3-Flash"},
+            "fixer": {"model": "baseten/zai-org/GLM-5.3-Flash"},
+            "explorer": {"model": "baseten/deepseek-ai/DeepSeek-V4-Flash-0731"},
+        },
+    }
+    with open(path, "w") as f:
+        json.dump(cfg, f, indent=2)
+        f.write("\n")
+    print("  slim preset set to baseten (GLM-5.3 chain)")
+else:
+    print(f"  slim preset already set to {cfg['preset']} — keeping it.")
 INNEREOF
 }
 
