@@ -119,6 +119,11 @@ cfg.setdefault("$schema", "https://opencode.ai/config.json")
 api_key = os.environ["BASETEN_API_KEY"]
 BASE_URL = "https://inference.baseten.co/v1"
 
+# Default the main session model to the chain head, and offload housekeeping
+# (titles, etc.) to the cheap Flash variant instead of burning GLM-5.3.
+cfg["model"] = "baseten/zai-org/GLM-5.3"
+cfg["small_model"] = "baseten/zai-org/GLM-5.3-Flash"
+
 cfg["provider"] = {
     "baseten": {
         "npm": "@ai-sdk/openai-compatible",
@@ -161,7 +166,11 @@ PYEOF
 }
 
 # Ensure ~/.config/opencode/opencode.json has permission: allow (merged with
-# any existing keys, e.g. an mcp servers block set elsewhere).
+# any existing keys, e.g. an mcp servers block set elsewhere), and
+# autoupdate: true so opencode itself always tracks the latest version.
+# Validated against the v2 schema (https://opencode.ai/config.json): the key
+# is `permission` (singular) with shorthand allow/ask/deny — there is no
+# top-level `permissions` rule-array in the shipped schema.
 configure_opencode_permission() {
   mkdir -p ~/.config/opencode
   python3 - << 'PYEOF'
@@ -176,6 +185,7 @@ except (FileNotFoundError, json.JSONDecodeError):
 
 config.setdefault("$schema", "https://opencode.ai/config.json")
 config["permission"] = "allow"
+config["autoupdate"] = True
 
 with open(path, "w") as f:
     json.dump(config, f, indent=2)
