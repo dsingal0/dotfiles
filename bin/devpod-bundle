@@ -140,6 +140,16 @@ labels+=("opencode2 CLI/TUI settings")
 abs_paths+=("$HOME_DIR/.config/opencode/opencode.json")
 labels+=("opencode settings")
 
+# oh-my-opencode-slim plugin settings (per-agent model chains, presets)
+abs_paths+=("$HOME_DIR/.config/opencode/oh-my-opencode-slim.json")
+labels+=("oh-my-opencode-slim plugin settings")
+
+# oh-my-openagent (OmO) data + config
+abs_paths+=("$HOME_DIR/.omo")
+labels+=("oh-my-openagent data (dir)")
+abs_paths+=("$HOME_DIR/.config/oh-my-openagent")
+labels+=("oh-my-openagent config")
+
 # factory droid
 abs_paths+=(
   "$HOME_DIR/.factory/auth.v2.file"
