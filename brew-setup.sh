@@ -51,10 +51,14 @@ export PATH="$PNPM_HOME/bin:$PATH"
 # must run); drop droid/paseo here so they don't shadow the pnpm/npm swap below.
 npm uninstall -g droid @getpaseo/cli 2>/dev/null || true
 
-# Coding harnesses: opencode via npm (v2 / opencode2), droid via npm, grok-build
-# is in the cask loop below and cursor-cli is further down.
+# 2026-09 pivot: opencode + oh-my-openagent (OmO) fully removed. jcode (our
+# fork, built from source via cargo) is the primary coding agent; carry (PTY
+# daemon with built-in iroh P2P) exposes jcode sessions to the phone app.
 uninstall_opencode_all_node_versions
-install_opencode_v2
+uninstall_opencode_and_omo
+ensure_jcode
+configure_jcode_providers
+ensure_carry
 
 # Install/update Meta CLI.
 curl -fsSL https://dev.meta.ai/install.sh | bash
@@ -126,13 +130,7 @@ PYEOF
 # Keep a copy in the dotfiles repo
 cp "$ALIASES_FILE" "$SCRIPT_DIR/baseten_aliases"
 
-# opencode itself is installed above, before the other coding harnesses.
-configure_opencode_permission
 configure_runlayer_mcp
-
-# Install the repo's global opencode instructions (~/.config/opencode/AGENTS.md)
-# so every project session follows the same global rules.
-install_global_agents_md "$SCRIPT_DIR"
 
 # Install cursor-cli (Cursor agent) via official installer
 echo "Installing cursor-cli..."

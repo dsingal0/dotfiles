@@ -111,22 +111,19 @@ ensure_pnpm_shell_path
 # must run); drop droid/paseo here so they don't shadow the npm reinstall below.
 npm uninstall -g droid @getpaseo/cli 2>/dev/null || true
 
-# Uninstall opencode (v1 `opencode` + v2 `opencode2`) from EVERY nvm node
-# version, not just the active one, so no stale copy shadows the fresh install
-# regardless of which node version a shell resolves.
+# 2026-09 pivot: opencode (v1+v2) and OmO fully removed. jcode (our fork,
+# built from source via cargo) is the primary coding agent; carry (PTY daemon
+# with built-in iroh P2P) exposes jcode sessions to the phone app.
 uninstall_opencode_all_node_versions
-
-install_opencode_v2
+uninstall_opencode_and_omo
+ensure_jcode
+configure_jcode_providers
+ensure_carry
 
 # Install/update Meta CLI.
 curl -fsSL https://dev.meta.ai/install.sh | bash
 
-configure_opencode_permission
 configure_runlayer_mcp
-
-# Install the repo's global opencode instructions (~/.config/opencode/AGENTS.md)
-# so every project session follows the same global rules.
-install_global_agents_md "$SCRIPT_DIR"
 
 # Install droid (Factory CLI) via pnpm - the official curl installer lags the
 # npm release (it's pinned to an older version), so pnpm gets the latest.

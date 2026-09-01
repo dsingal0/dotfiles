@@ -56,42 +56,46 @@ uninstall_opencode_all_node_versions() {
   pnpm_remove_global @opencode-ai/cli
 }
 
-# Install/update opencode v2 (@opencode-ai/cli@next) via npm.
-# See https://opencode.ai/v2/docs. Note the binary is named opencode2, not opencode.
+# Install/update opencode v1 (opencode-ai -> `opencode`) via npm.
+# See https://opencode.ai/docs. The binary is named opencode, not opencode2.
+# opencode v2 (@opencode-ai/cli -> `opencode2`) is intentionally NOT installed:
+# oh-my-openagent (OmO) is a V1 plugin — V2's plugin API is a hard break and
+# OmO has not been ported to it.
 #
 # npm is used instead of pnpm because pnpm skips postinstall scripts when it
 # reuses a cached copy from its content-addressable store. The tarball ships a
-# stub at bin/opencode2.exe ("postinstall script was not run" / exit 1), and the
+# stub at bin/opencode.exe ("postinstall script was not run" / exit 1), and the
 # package's postinstall replaces that stub with the real platform binary. npm
 # always runs postinstall, so this entire class of pnpm store-cache bugs goes away.
 #
-# --allow-scripts=@opencode-ai/cli is required on newer npm (11.x): its
+# --allow-scripts=opencode-ai is required on newer npm (11.x): its
 # install-scripts security feature blocks the package's postinstall (which
-# replaces the stub bin/opencode2.exe with the real platform binary) unless
+# replaces the stub bin/opencode.exe with the real platform binary) unless
 # explicitly allowed. Without it the binary stays a broken stub that errors
 # with "postinstall script was not run".
 
-# Install @opencode-ai/cli@next into the npm whose bin dir is $1. Returns 0 if
-# `opencode2 --version` then succeeds.
-_install_opencode_v2_into() {
+# Install opencode-ai into the npm whose bin dir is $1. Returns 0 if
+# `opencode --version` then succeeds.
+_install_opencode_v1_into() {
   local bin_dir="$1"
   local attempt
   for attempt in 1 2 3; do
-    if PATH="$bin_dir:$PATH" npm install -g --allow-scripts=@opencode-ai/cli @opencode-ai/cli@next >/dev/null 2>&1 && \
-       PATH="$bin_dir:$PATH" opencode2 --version >/dev/null 2>&1; then
-      echo "  opencode2 ready: $bin_dir"
+    if PATH="$bin_dir:$PATH" npm install -g --allow-scripts=opencode-ai opencode-ai >/dev/null 2>&1 && \
+       PATH="$bin_dir:$PATH" opencode --version >/dev/null 2>&1; then
+      echo "  opencode ready: $bin_dir"
       return 0
     fi
-    echo "Warning: opencode2 not runnable in $bin_dir (attempt $attempt/3); retrying..." >&2
+    echo "Warning: opencode not runnable in $bin_dir (attempt $attempt/3); retrying..." >&2
     sleep 2
   done
   return 1
 }
 
-install_opencode_v2() {
-  echo "Installing opencode (v2)..."
+install_opencode_v1() {
+  echo "Installing opencode (v1)..."
 
   # Remove any stale pnpm-managed copy so the npm binary is the one on PATH.
+  pnpm_remove_global opencode-ai
   pnpm_remove_global @opencode-ai/cli
 
   # `npm install -g` only installs into the currently active node version, so
@@ -107,22 +111,189 @@ install_opencode_v2() {
     [[ -n "$node_dir" ]] || continue
     bin_dir="$node_dir/bin"
     [[ -n "$current_bin" && "$bin_dir" == "$current_bin" ]] && skip_current=1
-    if _install_opencode_v2_into "$bin_dir"; then
+    if _install_opencode_v1_into "$bin_dir"; then
       installed=$((installed + 1))
     fi
   done < <(_nvm_node_version_dirs)
 
   if [[ "$skip_current" -eq 0 && -n "$current_bin" ]]; then
-    if _install_opencode_v2_into "$current_bin"; then
+    if _install_opencode_v1_into "$current_bin"; then
       installed=$((installed + 1))
     fi
   fi
 
   if [[ "$installed" -eq 0 ]]; then
-    echo "Warning: opencode2 could not be installed (continuing)" >&2
-    echo "  Fix manually: npm install -g --allow-scripts=@opencode-ai/cli @opencode-ai/cli@next" >&2
+    echo "Warning: opencode could not be installed (continuing)" >&2
+    echo "  Fix manually: npm install -g --allow-scripts=opencode-ai opencode-ai" >&2
   fi
   return 0
+}
+
+# Ensure bun is available (oh-my-openagent's installer must run via `bunx`).
+# Prefers Homebrew on macOS; falls back to the official bun installer script.
+ensure_bun() {
+  if command -v bun >/dev/null 2>&1; then
+    return 0
+  fi
+  echo "Installing bun (oh-my-openagent requirement)..."
+  if command -v brew >/dev/null 2>&1; then
+    brew install oven-sh/bun/bun
+  else
+    curl -fsSL https://bun.sh/install | bash
+    export PATH="$HOME/.bun/bin:$PATH"
+  fi
+  command -v bun >/dev/null 2>&1 || {
+    echo "WARNING: bun still not on PATH; oh-my-openagent install will be skipped." >&2
+    return 1
+  }
+}
+
+# Ensure ~/.config/opencode/opencode.json has a `baseten` OpenAI-compatible
+# provider (https://inference.baseten.co/v1, the Baseten Model APIs) so opencode
+# and OmO can run Baseten-hosted models (GLM-5.2, Kimi-K3, DeepSeek-V4-Pro, ...).
+# Reads BASETEN_API_KEY from the environment (callers source .env first). Skips
+# with a warning if the key is unset. Idempotent: merges with existing keys
+# (permission, mcp, plugin) instead of overwriting them.
+#
+# The model list mirrors configure_factory_models below; opencode also
+# auto-discovers whatever else the gateway serves via /v1/models.
+configure_opencode_baseten_provider() {
+  if [[ -z "${BASETEN_API_KEY:-}" ]]; then
+    echo "WARNING: BASETEN_API_KEY is not set. Skipping opencode Baseten provider."
+    echo "         To enable: cp .env.example .env and fill in your key, or export BASETEN_API_KEY."
+    return 0
+  fi
+
+  mkdir -p ~/.config/opencode
+  BASETEN_API_KEY="$BASETEN_API_KEY" python3 - << 'PYEOF'
+import json, os
+
+path = os.path.expanduser("~/.config/opencode/opencode.json")
+try:
+    with open(path) as f:
+        cfg = json.load(f)
+except (FileNotFoundError, json.JSONDecodeError):
+    cfg = {}
+
+cfg.setdefault("$schema", "https://opencode.ai/config.json")
+
+api_key = os.environ["BASETEN_API_KEY"]
+BASE_URL = "https://inference.baseten.co/v1"
+
+cfg["provider"] = {
+    "baseten": {
+        "npm": "@ai-sdk/openai-compatible",
+        "name": "Baseten",
+        "options": {
+            "baseURL": BASE_URL,
+            "apiKey": api_key,
+        },
+        "models": {
+            "deepseek-ai/DeepSeek-V4-Pro": {"name": "DeepSeek V4 Pro", "limit": {"context": 200000, "output": 262144}},
+            "moonshotai/Kimi-K3": {"name": "Kimi K3", "limit": {"context": 200000, "output": 262144}},
+            "nvidia/NVIDIA-Nemotron-3-Ultra-550B-A55B": {"name": "Nemotron Ultra", "limit": {"context": 200000, "output": 202800}},
+            "zai-org/GLM-5.2": {"name": "GLM 5.2", "limit": {"context": 200000, "output": 262144}},
+            "zai-org/GLM-5.2-Fast": {"name": "GLM 5.2 Fast", "limit": {"context": 200000, "output": 262144}},
+        },
+    },
+    # OpenRouter (free-tier last resort). Dormant until OPENROUTER_API_KEY is
+    # exported: opencode resolves {env:...} lazily, so the models are listed but
+    # auth fails until the key exists.
+    "openrouter": {
+        "npm": "@ai-sdk/openrouter",
+        "name": "OpenRouter",
+        "options": {"apiKey": "{env:OPENROUTER_API_KEY}"},
+        "models": {
+            "deepseek/deepseek-chat:free": {"name": "DeepSeek Chat (free)"},
+            "google/gemini-2.5-flash:free": {"name": "Gemini 2.5 Flash (free)"},
+            "meta-llama/llama-3.3-70b-instruct:free": {"name": "Llama 3.3 70B (free)"},
+            "qwen/qwen3-32b:free": {"name": "Qwen3 32B (free)"},
+        },
+    },
+}
+
+with open(path, "w") as f:
+    json.dump(cfg, f, indent=2)
+    f.write("\n")
+PYEOF
+  echo "  opencode baseten provider configured (inference.baseten.co/v1)"
+}
+
+# Install oh-my-openagent (OmO) Ultimate for OpenCode v1 and point every OmO
+# agent/category at the intelligence-ordered model chain (GLM-5.3 first, down
+# to free OpenCode/OpenRouter models).
+#
+# Requires bun and BASETEN_API_KEY (from .env). Idempotent: the OmO installer is
+# safe to re-run, and the omo.jsonc step rewrites only the [opencode] block.
+# Pass the repo root as $1 (for .env loading).
+install_opencode_omo() {
+  local repo_dir="$1"
+  load_env_file "$repo_dir"
+
+  if ! ensure_bun; then
+    echo "WARNING: skipping oh-my-openagent install (bun missing)." >&2
+    return 0
+  fi
+
+  echo "Installing oh-my-openagent (OmO) for opencode..."
+  bunx --yes oh-my-openagent install \
+    --no-tui --platform=opencode \
+    --claude=no --openai=yes --gemini=no --copilot=no \
+    --opencode-zen=no --zai-coding-plan=no --opencode-go=no \
+    --kimi-for-coding=no --bailian-coding-plan=no \
+    --minimax-cn-coding-plan=no --minimax-coding-plan=no \
+    --vercel-ai-gateway=no --skip-auth \
+    || echo "WARNING: oh-my-openagent install reported errors (continuing)." >&2
+
+  configure_opencode_baseten_provider
+
+  # Point every OmO agent/category at the intelligence-ordered model chain:
+  # GLM-5.3 -> GLM-5.3-Flash -> DeepSeek V4 Pro 0813 -> DeepSeek V4 Flash 0731
+  # -> Meta Muse 1.2 Contributor -> free OpenCode Zen models -> free OpenRouter
+  # models. Models resolve through opencode providers (baseten/meta are built in
+  # or configured above; openrouter is dormant until OPENROUTER_API_KEY is set).
+  BASETEN_API_KEY="${BASETEN_API_KEY:-}" python3 - << 'PYEOF'
+import json, os
+
+path = os.path.expanduser("~/.omo/omo.jsonc")
+try:
+    raw = open(path).read()
+except FileNotFoundError:
+    raw = ""
+
+# Strip leading // comment lines so json.loads can parse the JSONC.
+lines = [ln for ln in raw.splitlines() if not ln.lstrip().startswith("//")]
+try:
+    data = json.loads("\n".join(lines)) if "\n".join(lines).strip() else {}
+except json.JSONDecodeError:
+    data = {}
+
+B, M, Z, OR = "baseten", "meta", "opencode", "openrouter"
+CHAIN = [
+    f"{B}/zai-org/GLM-5.3",                       # 1. best
+    f"{B}/zai-org/GLM-5.3-Flash",                 # 2.
+    f"{B}/deepseek-ai/DeepSeek-V4-Pro-0813",      # 3.
+    f"{B}/deepseek-ai/DeepSeek-V4-Flash-0731",    # 4.
+    f"{M}/muse-spark-1.2-contributor",            # 5. Meta Muse 1.2 Contributor
+    f"{Z}/muse-spark-1.2-contributor-free",       # 6. free opencode
+    f"{Z}/nemotron-3-ultra-free",
+    f"{Z}/ling-3.0-flash-fin-free",
+    f"{OR}/deepseek/deepseek-chat:free",          # 7. free openrouter (needs key)
+]
+primary = CHAIN[0]
+fallbacks = [{"model": m} for m in CHAIN[1:]]
+
+block = data.setdefault("[opencode]", {})
+for group in ("agents", "categories"):
+    for name in block.setdefault(group, {}):
+        block[group][name] = {"model": primary, "fallback_models": fallbacks}
+
+block["$schema"] = "https://raw.githubusercontent.com/code-yeongyu/oh-my-openagent/dev/assets/omo.schema.json"
+data["[opencode]"] = block
+with open(path, "w") as f:
+    f.write("// OMO configuration\n" + json.dumps(data, indent=2) + "\n")
+PYEOF
+  echo "  OmO agents/categories wired to the intelligence-ordered model chain."
 }
 
 # Ensure ~/.config/opencode/opencode.json has permission: allow (merged with
@@ -149,10 +320,10 @@ PYEOF
 }
 
 # Ensure runlayer MCP (https://baseten.runlayer.com/mcp) is configured in
-# all three harnesses: opencode2, droid, and cursor-cli. Idempotent.
+# all three harnesses: opencode, droid, and cursor-cli. Idempotent.
 configure_runlayer_mcp() {
   local url="https://baseten.runlayer.com/mcp"
-  # opencode2 -> ~/.config/opencode/opencode.json (v2: mcp.servers.<name>)
+  # opencode -> ~/.config/opencode/opencode.json (v1: mcp.<name> at top level)
   mkdir -p ~/.config/opencode
   python3 - << 'PYEOF'
 import json, os
@@ -164,8 +335,7 @@ except (FileNotFoundError, json.JSONDecodeError):
     cfg = {}
 cfg.setdefault("$schema", "https://opencode.ai/config.json")
 cfg.setdefault("mcp", {})
-cfg["mcp"].setdefault("servers", {})
-cfg["mcp"]["servers"]["runlayer"] = {"type": "remote", "url": "https://baseten.runlayer.com/mcp"}
+cfg["mcp"]["runlayer"] = {"type": "remote", "url": "https://baseten.runlayer.com/mcp"}
 with open(path, "w") as f:
     json.dump(cfg, f, indent=2)
     f.write("\n")
@@ -962,4 +1132,223 @@ ensure_croc() {
     echo "WARNING: failed to download/install croc from $url"
   fi
   rm -rf "$tmp"
+}
+
+# ============================================================================
+# jcode + carry (2026-09 pivot: opencode/OmO removed, jcode is the primary
+# coding agent inside carry PTY sessions; carryd exposes them over iroh).
+# ============================================================================
+
+# Fully uninstall opencode (v1 + v2), oh-my-openagent (OmO), and all their
+# config/data dirs. Idempotent. Covers: nvm node version dirs, the current npm
+# prefix, pnpm store, the old curl installer, Homebrew (if installed that way),
+# launch agents, and the config/data dirs (~/.opencode, ~/.config/opencode,
+# ~/.local/share/opencode, ~/.cache/opencode, ~/.omo, ~/.local/share/omo).
+uninstall_opencode_and_omo() {
+  echo "Uninstalling opencode + oh-my-openagent (OmO)..."
+  # 1. Binaries from every nvm node version dir.
+  local node_dir bin_dir lib_dir
+  while IFS= read -r node_dir; do
+    [[ -n "$node_dir" ]] || continue
+    bin_dir="$node_dir/bin"
+    lib_dir="$node_dir/lib/node_modules"
+    rm -f "$bin_dir/opencode" "$bin_dir/opencode2" "$bin_dir/omo" 2>/dev/null || true
+    rm -rf "$lib_dir/opencode-ai" "$lib_dir/@opencode-ai" \
+           "$lib_dir/oh-my-openagent" "$lib_dir/oh-my-opencode" 2>/dev/null || true
+  done < <(_nvm_node_version_dirs)
+
+  # 2. Current package-manager prefixes (npm active version, pnpm, brew).
+  npm uninstall -g opencode-ai @opencode-ai/oh-my-openagent opencode-ai@latest 2>/dev/null || true
+  npm uninstall -g opencode-ai @opencode-ai/cli 2>/dev/null || true
+  pnpm_remove_global opencode-ai @opencode-ai/cli oh-my-openagent oh-my-opencode
+  if command -v brew >/dev/null 2>&1; then
+    brew uninstall --cask opencode 2>/dev/null || true
+    brew uninstall opencode 2>/dev/null || true
+  fi
+
+  # 3. Old curl-installer and stray launch agents.
+  rm -rf "$HOME/.opencode" 2>/dev/null || true
+  local launch
+  for launch in ~/Library/LaunchAgents/*opencode* ~/Library/LaunchAgents/*omo*; do
+    [[ -e "$launch" ]] || continue
+    launchctl unload "$launch" 2>/dev/null || true
+    rm -f "$launch"
+  done
+
+  # 4. Kill any lingering processes.
+  pkill -f "opencode" 2>/dev/null || true
+  pkill -f "oh-my-open" 2>/dev/null || true
+
+  # 5. Config + data dirs (last, so the binary checks above still see them).
+  rm -rf "$HOME/.config/opencode" \
+         "$HOME/.local/share/opencode" \
+         "$HOME/.cache/opencode" \
+         "$HOME/.local/state/opencode" \
+         "$HOME/.omo" \
+         "$HOME/.cache/oh-my-openagent" \
+         "$HOME/.config/oh-my-openagent" 2>/dev/null || true
+
+  echo "  opencode + OmO removed (binaries, configs, data dirs)."
+}
+
+# Clone or update the dsingal0/jcode fork and build+install the `jcode` binary
+# from source (release profile). Prefers an existing checkout at ~/repos/jcode.
+# Falls back to cloning. Installs to ~/.local/bin (Linux) or /usr/local/bin via
+# brew prefix on macOS... actually: always ~/.local/bin + PATH persistence, so
+# cargo is the only requirement.
+# Reads JCODE_REPO (default ~/repos/jcode) and optionally JCODE_BRANCH.
+ensure_jcode() {
+  local repo="${JCODE_REPO:-$HOME/repos/jcode}"
+  local branch="${JCODE_BRANCH:-feat/responses-api-and-baseten-reasoning}"
+
+  # cargo is required to build; ensure it exists (rustup).
+  if ! command -v cargo >/dev/null 2>&1; then
+    echo "cargo not found; installing rustup (needed to build jcode)..."
+    curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain stable
+    export PATH="$HOME/.cargo/bin:$PATH"
+  fi
+  command -v cargo >/dev/null 2>&1 || { echo "WARNING: cargo unavailable; cannot build jcode" >&2; return 0; }
+
+  # Clone or update the fork.
+  if [[ -d "$repo/.git" ]]; then
+    echo "Updating jcode fork at $repo..."
+    git -C "$repo" fetch origin "$branch" 2>/dev/null || true
+    git -C "$repo" checkout "$branch" 2>/dev/null || true
+    git -C "$repo" pull --ff-only origin "$branch" 2>/dev/null || true
+  else
+    mkdir -p "$(dirname "$repo")"
+    echo "Cloning dsingal0/jcode ($branch) to $repo..."
+    git clone --branch "$branch" https://github.com/dsingal0/jcode.git "$repo" \
+      || git clone https://github.com/dsingal0/jcode.git "$repo"
+  fi
+
+  echo "Building jcode (release) — this can take a few minutes..."
+  if (cd "$repo" && cargo build --release 2>&1 | tail -1); then
+    mkdir -p "$HOME/.local/bin"
+    install -m 755 "$repo/target/release/jcode" "$HOME/.local/bin/jcode" 2>/dev/null \
+      || { echo "WARNING: built binary not found at $repo/target/release/jcode"; return 0; }
+    export PATH="$HOME/.local/bin:$PATH"
+    persist_local_bin
+    echo "  jcode installed: $HOME/.local/bin/jcode ($("$HOME/.local/bin/jcode" --version 2>/dev/null | head -1))"
+  else
+    echo "WARNING: jcode build failed; see output above." >&2
+  fi
+  return 0
+}
+
+# Persist ~/.local/bin onto PATH in shell rc files (managed block).
+persist_local_bin() {
+  local rc_files=("$HOME/.bashrc")
+  [[ -f "$HOME/.zshrc" ]] && rc_files+=("$HOME/.zshrc")
+  local rc
+  for rc in "${rc_files[@]}"; do
+    touch "$rc"
+    RC_FILE="$rc" python3 - "$rc" <<'PYEOF'
+import os, re, sys
+path = sys.argv[1]
+line = 'export PATH="$HOME/.local/bin:$PATH"'
+open_m = "# >>> ~/.local/bin on PATH (managed by dotfiles setup) >>>"
+close_m = "# <<< ~/.local/bin >>>"
+try:
+    content = open(path).read()
+except FileNotFoundError:
+    content = ""
+block = open_m + "\n" + line + "\n" + close_m
+pat = re.compile(re.escape(open_m) + r".*?" + re.escape(close_m) + r"\n?", re.DOTALL)
+if pat.search(content):
+    content = pat.sub(lambda _m: block, content)
+else:
+    content = content.rstrip("\n")
+    content = (content + "\n\n" + block + "\n") if content else (block + "\n")
+with open(path, "w") as f:
+    f.write(content)
+PYEOF
+  done
+}
+
+# Configure jcode providers: Baseten (primary, with the intelligence-ordered
+# model chain from docs/decisions.md) plus dormant OpenRouter fallback.
+# Reads BASETEN_API_KEY / OPENROUTER_API_KEY from the env (callers source .env).
+# Uses `jcode provider add` so keys land in jcode's private env file.
+configure_jcode_providers() {
+  command -v jcode >/dev/null 2>&1 || { echo "WARNING: jcode not on PATH; skipping provider config"; return 0; }
+
+  if [[ -n "${BASETEN_API_KEY:-}" ]]; then
+    echo "  configuring jcode baseten profile (GLM-5.3 chain)..."
+    printf '%s' "$BASETEN_API_KEY" | jcode provider add baseten-byok \
+      --provider baseten \
+      --base-url https://inference.baseten.co/v1 \
+      --model "zai-org/GLM-5.3" \
+      --api-key-stdin --quiet 2>/dev/null \
+    || jcode provider add baseten-byok \
+      --provider baseten \
+      --base-url https://inference.baseten.co/v1 \
+      --model "zai-org/GLM-5.3" \
+      --api-key "$BASETEN_API_KEY" --quiet 2>/dev/null \
+    || echo "  WARNING: jcode baseten provider setup failed (run: jcode provider add baseten-byok ...)"
+  else
+    echo "  NOTE: BASETEN_API_KEY not set; skipping jcode baseten provider."
+  fi
+
+  # Meta (Meta Muse) — key persisted to shell rc when present.
+  if [[ -n "${META_API_KEY:-}" ]]; then
+    jcode provider add meta --provider meta-muse \
+      --model "muse-spark-1.2-contributor" \
+      --api-key "$META_API_KEY" --quiet 2>/dev/null \
+      || echo "  NOTE: meta provider setup failed (may need OAuth: jcode /login meta)"
+  fi
+
+  # OpenRouter stays dormant until OPENROUTER_API_KEY exists.
+  if [[ -n "${OPENROUTER_API_KEY:-}" ]]; then
+    jcode provider add openrouter-free --provider openrouter \
+      --base-url https://openrouter.ai/api/v1 \
+      --model "nvidia/nemotron-3-ultra-550b-a55b:free" \
+      --api-key "$OPENROUTER_API_KEY" --quiet 2>/dev/null || true
+  fi
+}
+
+# Install carry (the remote-control daemon this phone app pairs with) from
+# source. Repo expected at ~/repos/remote_agent (cloned/updated if missing).
+# Installs both `carry` (CLI + daemon) into ~/.local/bin and prints next steps.
+ensure_carry() {
+  local repo="${CARRY_REPO:-$HOME/repos/remote_agent}"
+
+  if ! command -v cargo >/dev/null 2>&1; then
+    echo "cargo not found; installing rustup (needed to build carry)..."
+    curl --proto '=https' --tlvs 2>/dev/null || true
+  fi
+  # Re-check after potential install by jcode step; share the same toolchain.
+  if ! command -v cargo >/dev/null 2>&1; then
+    curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain stable
+    export PATH="$HOME/.cargo/bin:$PATH"
+  fi
+  command -v cargo >/dev/null 2>&1 || { echo "WARNING: cargo unavailable; cannot build carry" >&2; return 0; }
+
+  if [[ -d "$repo/.git" ]]; then
+    echo "Updating carry repo at $repo..."
+    git -C "$repo" fetch origin 2>/dev/null || true
+    git -C "$repo" pull --ff-only 2>/dev/null || true
+  else
+    mkdir -p "$(dirname "$repo")"
+    echo "Cloning carry (dsingal0/remote_agent) to $repo..."
+    git clone https://github.com/dsingal0/remote_agent.git "$repo"
+  fi
+
+  echo "Building carry (release)..."
+  if (cd "$repo" && cargo build --release -p carry-cli 2>&1 | tail -1); then
+    mkdir -p "$HOME/.local/bin"
+    install -m 755 "$repo/target/release/carry" "$HOME/.local/bin/carry"
+    export PATH="$HOME/.local/bin:$PATH"
+    persist_local_bin
+    echo "  carry installed: $HOME/.local/bin/carry"
+    echo ""
+    echo "  Next steps for the phone app:"
+    echo "    1. Start the daemon:   carry daemon start"
+    echo "       (prints the iroh Node ID and a 6-digit pairing code)"
+    echo "    2. In the app: Pair -> carry mode -> paste Node ID + code"
+    echo "    3. Sessions:           carry session new --cmd jcode"
+  else
+    echo "WARNING: carry build failed; see output above." >&2
+  fi
+  return 0
 }
