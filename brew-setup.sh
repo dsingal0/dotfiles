@@ -169,12 +169,6 @@ baseten --version 2>/dev/null || baseten version 2>/dev/null || true
 # ~/venv with truss (Baseten model authoring / deploy-loop)
 ensure_venv
 
-# Install paseo CLI via npm (pre-release track via the `beta` dist-tag).
-# npm is used instead of pnpm because npm always runs postinstall scripts.
-pnpm_remove_global @getpaseo/cli
-npm install -g @getpaseo/cli@beta
-
-
 # Remove stale downloads and old versions
 brew cleanup --prune=all || echo "Warning: brew cleanup failed (continuing)"
 

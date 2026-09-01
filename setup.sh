@@ -158,13 +158,6 @@ done
 echo "Installing Cursor CLI..."
 curl https://cursor.com/install -fsS | bash
 
-# Install/update paseo (pre-release track via the `beta` dist-tag)
-echo "Installing paseo..."
-pnpm_remove_global @getpaseo/cli
-npm install -g @getpaseo/cli@beta
-# Bare `paseo` runs onboard and prompts for relay pairing + voice on a TTY.
-# --no-relay skips device pairing; --voice disable skips voice model downloads.
-paseo onboard --no-relay --voice disable
 
 # Install/update rtk (Rust Token Killer) - CLI proxy that cuts LLM token usage.
 # Single Rust binary in ~/.local/bin; ensure that dir is on PATH for this script
