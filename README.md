@@ -28,10 +28,9 @@ cd ~/dotfiles
 ./brew-setup.sh
 ```
 
-### Baseten BYOK (optional)
+### Baseten API key (used by jcode, droid, and OpenAI-compatible tooling)
 
-To wire custom Baseten-hosted models into Factory (`~/.factory/settings.json`),
-provide an API key:
+Wires Baseten-hosted models into jcode (the `baseten-byok` provider profile, default model GLM-5.3), Factory droid custom models, and OpenRouter-compatible tooling. Provide an API key:
 
 ```bash
 cp .env.example .env
@@ -58,16 +57,13 @@ is skipped with a warning.
 
 ```
 .
-├── setup.sh           # Linux bootstrap (apt, nvm, rust, droid, rtk, ...)
+├── setup.sh           # Linux bootstrap (apt, nvm, rust, jcode, carry, droid, ...)
 ├── setup-arch.sh      # Arch Linux bootstrap (pacman + paru/AUR, same toolchain)
 ├── brew-setup.sh      # macOS bootstrap (Homebrew formulae + casks)
 ├── lib/
-│   └── shared.sh      # sourced by both bootstrap scripts: opencode permission
-│                       #   + Baseten BYOK Factory custom-models config
-├── config/
-│   └── opencode/
-│       └── AGENTS.md  # global opencode instructions symlinked to
-│                       #   ~/.config/opencode/AGENTS.md
+│   └── shared.sh      # sourced by all bootstraps: jcode + carry installers,
+│                       #   opencode/OmO removal, Baseten provider config
+├── config/               # per-harness configs (opencode removed 2026-09)
 ├── tmux.conf          # tmux config symlinked to ~/.tmux.conf
 ├── bin/
 │   ├── droid-export   # export a Factory "droid" session to JSONL / markdown
@@ -85,12 +81,20 @@ is skipped with a warning.
 
 ### Both platforms (via `lib/shared.sh`)
 
-- **opencode** - installed FIRST among the coding harnesses (official curl
-  installer; npm fallback on Linux), with `permission: allow` merged into
-  `~/.config/opencode/opencode.json`
-- **global opencode instructions** - `config/opencode/AGENTS.md` symlinked to
-  `~/.config/opencode/AGENTS.md` (no `/tmp`, lowercase names, worktrees above
-  the repo, Docker host networking)
+- **jcode** (primary coding agent): cloned/updated from the `dsingal0/jcode`
+  fork (branch `feat/responses-api-and-baseten-reasoning` — adds OpenAI
+  Responses API support and Baseten per-model reasoning efforts), built with
+  cargo and installed to `~/.local/bin/jcode`. Providers are configured from
+  `.env`: `baseten-byok` profile (GLM-5.3 chain) when `BASETEN_API_KEY` is set.
+- **carry** (remote control daemon): cloned/built from
+  `dsingal0/remote_agent` (release profile) and installed to
+  `~/.local/bin/carry`. Runs a headless PTY daemon with built-in iroh P2P
+  pairing for the mobile app; jcode runs inside carry sessions
+  (`carry session new --cmd jcode`). Start with `carry daemon start` — it
+  prints the iroh Node ID and a 6-digit pairing code for the phone app.
+- opencode and oh-my-openagent (OmO) are fully uninstalled (binaries, config,
+  data dirs) as part of the 2026-09 pivot to jcode.
+
 - **droid** (Factory CLI; official curl installer, npm fallback on Linux)
 - **Factory custom models** - Baseten BYOK entries written to
   `~/.factory/settings.json` (requires `BASETEN_API_KEY`)
@@ -129,7 +133,7 @@ apt:
   **tmux**, **gh** (as `github-cli`), **croc**, **uv** (best-effort via pacman)
 - **paru** (AUR helper, built from the AUR if missing)
 - **rtk** (via AUR `rtk-bin`, falling back to the official curl installer)
-- everything else (nvm + Node.js 26, pnpm, droid, opencode, paseo, Rust/Cargo,
+- everything else (nvm + Node.js 26, pnpm, droid, jcode, carry, paseo, Rust/Cargo,
   Cursor CLI, skills, Baseten CLI, truss venv) installs exactly as in `setup.sh`
 
 ### macOS (`brew-setup.sh`)
@@ -142,7 +146,7 @@ apt:
   **paseo** (npm)
 ## tmux config (`tmux.conf`)
 
-Tuned for running TUI agents (Droid, Claude Code, opencode) inside tmux,
+Tuned for running TUI agents (jcode, Droid, Claude Code) inside tmux,
 including over SSH to remote pods. Symlinked to `~/.tmux.conf` by both setup
 scripts. Highlights:
 
