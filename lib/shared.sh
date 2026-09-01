@@ -56,6 +56,32 @@ uninstall_opencode_all_node_versions() {
   pnpm_remove_global @opencode-ai/cli
 }
 
+# Fully uninstall oh-my-openagent (OmO) and oh-my-opencode-slim remnants plus
+# all opencode config/data dirs. Idempotent. Complements
+# uninstall_opencode_all_node_versions (which handles the binaries).
+uninstall_opencode_and_omo() {
+  echo "Removing OmO / slim configs and opencode data dirs..."
+  # Kill lingering processes first.
+  pkill -f "opencode" 2>/dev/null || true
+  pkill -f "oh-my-open" 2>/dev/null || true
+  pkill -f "omo" 2>/dev/null || true
+
+  # Package-manager copies of the plugins.
+  npm uninstall -g oh-my-openagent oh-my-opencode oh-my-opencode-slim 2>/dev/null || true
+  pnpm_remove_global oh-my-openagent oh-my-opencode oh-my-opencode-slim
+
+  # Old curl/bun installer copies.
+  rm -rf "$HOME/.omo" "$HOME/.cache/oh-my-openagent" "$HOME/.config/oh-my-openagent" 2>/dev/null || true
+
+  # opencode config + data dirs (fresh v2 setup recreates them).
+  rm -rf "$HOME/.config/opencode" \
+         "$HOME/.local/share/opencode" \
+         "$HOME/.cache/opencode" \
+         "$HOME/.local/state/opencode" 2>/dev/null || true
+
+  echo "  OmO/slim remnants and opencode data dirs removed."
+}
+
 # Install/update opencode v1 (opencode-ai -> `opencode`) via npm.
 # See https://opencode.ai/docs. The binary is named opencode, not opencode2.
 # opencode v2 (@opencode-ai/cli -> `opencode2`) is intentionally NOT installed:
