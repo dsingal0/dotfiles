@@ -93,7 +93,7 @@ ensure_bun() {
 #
 # The model list mirrors configure_factory_models below; opencode also
 # auto-discovers whatever else the gateway serves via /v1/models.
-# NOTE: the GLM-5.3 model chain is also pinned in configure_omod_slim_preset
+# NOTE: the GLM-5.3 model chain is also pinned in configure_omod_slim_presets
 # (oh-my-opencode-slim) — update both together when models change.
 # auto-discovers whatever else the gateway serves via /v1/models.
 configure_opencode_baseten_provider() {
@@ -1040,89 +1040,22 @@ PYEOF
 }
 
 
-# Overwrite the slim plugin's auto-generated preset (defaults to openai /
-# gpt-5.6-* which don't apply here) with our Baseten chain.
-configure_omod_slim_preset() {
-  mkdir -p ~/.config/opencode
-  python3 /dev/stdin << 'INNEREOF'
-import json, os
-path = os.path.expanduser("~/.config/opencode/oh-my-opencode-slim.json")
-try:
-    with open(path) as f:
-        cfg = json.load(f)
-except (FileNotFoundError, json.JSONDecodeError):
-    cfg = {}
-# Only set the preset if it's missing or still the default "openai" —
-# don't clobber a user-chosen preset on re-runs.
-# NOTE: the GLM-5.3 model chain here must mirror the models dict in
-# configure_opencode_baseten_provider — update both together.
-if cfg.get("preset") not in ("baseten", "baseten-fast"):
-    cfg["preset"] = "baseten"
-    cfg["presets"] = {
-        "baseten": {
-            "orchestrator": {"model": "baseten/zai-org/GLM-5.3"},
-            "oracle": {"model": "baseten/zai-org/GLM-5.3"},
-            "council": {"model": "baseten/zai-org/GLM-5.3"},
-            "librarian": {"model": "baseten/zai-org/GLM-5.3-Flash"},
-            "designer": {"model": "baseten/zai-org/GLM-5.3"},
-            "fixer": {"model": "baseten/zai-org/GLM-5.3-Flash"},
-            "explorer": {"model": "baseten/zai-org/GLM-5.3-Flash"},
-        },
-        "baseten-fast": {
-            "orchestrator": {"model": "baseten/zai-org/GLM-5.3-Flash"},
-            "oracle": {"model": "baseten/zai-org/GLM-5.3-Flash"},
-            "council": {"model": "baseten/zai-org/GLM-5.3-Flash"},
-            "librarian": {"model": "baseten/deepseek-ai/DeepSeek-V4-Flash-0731"},
-            "designer": {"model": "baseten/zai-org/GLM-5.3-Flash"},
-            "fixer": {"model": "baseten/zai-org/GLM-5.3-Flash"},
-            "explorer": {"model": "baseten/deepseek-ai/DeepSeek-V4-Flash-0731"},
-        },
-    }
-    with open(path, "w") as f:
-        json.dump(cfg, f, indent=2)
-        f.write("\n")
-    print("  slim preset set to baseten (GLM-5.3 chain)")
-else:
-    print(f"  slim preset already set to {cfg['preset']} — keeping it.")
-INNEREOF
-}
-
-# Persist ~/.local/bin onto PATH in shell rc files (managed block).
+# Persist ~/.local/bin onto PATH in shell rc files (managed block), using
+# the same marker scheme as persist_export_to_rc so the block stays unique.
 persist_local_bin() {
-  local rc_files=("$HOME/.bashrc")
-  [[ -f "$HOME/.zshrc" ]] && rc_files+=("$HOME/.zshrc")
-  local rc
-  for rc in "${rc_files[@]}"; do
-    touch "$rc"
-    RC_FILE="$rc" python3 - "$rc" <<'PYEOF'
-import os, re, sys
-path = sys.argv[1]
-line = 'export PATH="$HOME/.local/bin:$PATH"'
-open_m = "# >>> ~/.local/bin on PATH (managed by dotfiles setup) >>>"
-close_m = "# <<< ~/.local/bin >>>"
-try:
-    content = open(path).read()
-except FileNotFoundError:
-    content = ""
-block = open_m + "\n" + line + "\n" + close_m
-pat = re.compile(re.escape(open_m) + r".*?" + re.escape(close_m) + r"\n?", re.DOTALL)
-if pat.search(content):
-    content = pat.sub(lambda _m: block, content)
-else:
-    content = content.rstrip("\n")
-    content = (content + "\n\n" + block + "\n") if content else (block + "\n")
-with open(path, "w") as f:
-    f.write(content)
-PYEOF
-  done
+  write_managed_rc_block \
+    "# >>> ~/.local/bin on PATH (managed by dotfiles setup) >>>" \
+    "# <<< ~/.local/bin >>>" \
+    'export PATH="$HOME/.local/bin:$PATH"'
 }
 
 
-# Write oh-my-opencode-slim per-agent presets + model chains into the opencode
-# config. Chains are intelligence-ordered: best Baseten model first, then
-# progressively cheaper/flash variants, then free OpenCode/OpenRouter models.
-# Each agent's primary model is its "best" (deep reasoning for orchestrator/
-# oracle/council, fast for explorer/fixer/librarian).
+# Write oh-my-opencode-slim per-agent model fallback chains into the opencode
+# config. One preset ("default"): each agent gets an intelligence-ordered
+# chain — its usual tier first (GLM-5.3 for reasoning agents, GLM-5.3-Flash
+# for explorer/fixer/librarian), then progressively cheaper Baseten models,
+# ending on free opencode/OpenRouter models. The slim plugin's
+# ForegroundFallbackManager walks the chain on rate limits / failures.
 configure_omod_slim_presets() {
   mkdir -p ~/.config/opencode
   python3 - "$HOME" << 'PYEOF'
@@ -1136,112 +1069,43 @@ try:
 except (FileNotFoundError, json.JSONDecodeError):
     cfg = {}
 
-# Per-agent model presets. Format: presets.<name>.<agent> = {model, variant?}
+glm53 = "baseten/zai-org/GLM-5.3"
+glm53f = "baseten/zai-org/GLM-5.3-Flash"
+ds_flash = "baseten/deepseek-ai/DeepSeek-V4-Flash-0731"
+baseten_tail = [
+    "baseten/moonshotai/Kimi-K3",
+    "baseten/deepseek-ai/DeepSeek-V4-Pro",
+    "baseten/nvidia/NVIDIA-Nemotron-3-Ultra-550B-A55B",
+    "baseten/zai-org/GLM-5.2",
+    "baseten/zai-org/GLM-5.2-Fast",
+]
+free_floor = [
+    "opencode/nvidia/nemotron-3-ultra-550b-a55b:free",
+    "openrouter/deepseek/deepseek-chat:free",
+    "openrouter/google/gemini-2.5-flash:free",
+    "openrouter/meta-llama/llama-3.3-70b-instruct:free",
+    "openrouter/qwen/qwen3-32b:free",
+]
+heavy = [glm53, glm53f, ds_flash] + baseten_tail + free_floor
+light = [glm53f, ds_flash] + baseten_tail + free_floor
+
+# One preset; per-agent chains. Format: presets.default.<agent> = {model: [chain]}
 cfg["presets"] = {
     "default": {
-        "orchestrator": {"model": "baseten/zai-org/GLM-5.3"},
-        "oracle":        {"model": "baseten/zai-org/GLM-5.3"},
-        "council":       {"model": "baseten/zai-org/GLM-5.3"},
-        "librarian":     {"model": "baseten/zai-org/GLM-5.3-Flash"},
-        "designer":      {"model": "baseten/zai-org/GLM-5.3"},
-        "fixer":         {"model": "baseten/zai-org/GLM-5.3-Flash"},
-        "explorer":      {"model": "baseten/zai-org/GLM-5.3-Flash"},
-    },
-    "best": {
-        "orchestrator": {"model": "baseten/zai-org/GLM-5.3"},
-        "oracle":        {"model": "baseten/zai-org/GLM-5.3"},
-        "council":       {"model": "baseten/zai-org/GLM-5.3"},
-        "librarian":     {"model": "baseten/zai-org/GLM-5.3"},
-        "designer":      {"model": "baseten/zai-org/GLM-5.3"},
-        "fixer":         {"model": "baseten/zai-org/GLM-5.3"},
-        "explorer":      {"model": "baseten/zai-org/GLM-5.3"},
-    },
-    "fast": {
-        "orchestrator": {"model": "baseten/zai-org/GLM-5.3-Flash"},
-        "oracle":        {"model": "baseten/zai-org/GLM-5.3-Flash"},
-        "council":       {"model": "baseten/zai-org/GLM-5.3-Flash"},
-        "librarian":     {"model": "baseten/deepseek-ai/DeepSeek-V4-Flash-0731"},
-        "designer":      {"model": "baseten/zai-org/GLM-5.3-Flash"},
-        "fixer":         {"model": "baseten/zai-org/GLM-5.3-Flash"},
-        "explorer":      {"model": "baseten/deepseek-ai/DeepSeek-V4-Flash-0731"},
-    },
-    "free": {
-        "orchestrator": {"model": "opencode/nvidia/nemotron-3-ultra-550b-a55b:free"},
-        "oracle":        {"model": "opencode/nvidia/nemotron-3-ultra-550b-a55b:free"},
-        "council":       {"model": "opencode/nvidia/nemotron-3-ultra-550b-a55b:free"},
-        "librarian":     {"model": "opencode/nvidia/nemotron-3-ultra-550b-a55b:free"},
-        "designer":      {"model": "opencode/nvidia/nemotron-3-ultra-550b-a55b:free"},
-        "fixer":         {"model": "opencode/nvidia/nemotron-3-ultra-550b-a55b:free"},
-        "explorer":      {"model": "opencode/nvidia/nemotron-3-ultra-550b-a55b:free"},
+        "orchestrator": {"model": heavy},
+        "oracle":        {"model": heavy},
+        "council":       {"model": heavy},
+        "librarian":     {"model": light},
+        "designer":      {"model": heavy},
+        "fixer":         {"model": light},
+        "explorer":      {"model": light},
     },
 }
 
 with open(path, "w") as f:
     json.dump(cfg, f, indent=2)
     f.write("\n")
-print("  per-agent presets configured (default/best/fast/free)")
+print("  per-agent fallback chains configured (single 'default' preset)")
 PYEOF
   echo "  oh-my-opencode-slim presets written."
-}
-
-# Automatic model failover via the opencode-auto-fallback plugin: transient 429s
-# get exponential-backoff retries on the same model; hard quota/auth errors and
-# exhausted retries fail over to the next model in the agent's chain (with a
-# cooldown, so a rate-limited model is skipped until it recovers).
-# Chains mirror the "default" preset above: GLM-5.3 -> GLM-5.3-Flash ->
-# DeepSeek-V4-Flash-0731, one tier down from each agent's primary.
-# NOTE: the model chain is also pinned in configure_opencode_baseten_provider and
-# configure_omod_slim_presets — update all three together when models change.
-configure_opencode_fallback() {
-  mkdir -p ~/.config/opencode
-  python3 - "$HOME" << 'PYEOF'
-import json, os
-
-home = os.environ["HOME"]
-fb_path = os.path.join(home, ".config/opencode/fallback.json")
-
-# Don't clobber a hand-tuned config on re-runs; only write if missing.
-if os.path.exists(fb_path):
-    print("  fallback.json already exists — keeping it")
-else:
-    glm = "baseten/zai-org/GLM-5.3"
-    glm_fast = "baseten/zai-org/GLM-5.3-Flash"
-    ds_fast = "baseten/deepseek-ai/DeepSeek-V4-Flash-0731"
-    agents = {
-        # Primary GLM-5.3 -> drop one tier, then two.
-        "orchestrator": {"fallback": [glm_fast, ds_fast]},
-        "oracle":       {"fallback": [glm_fast, ds_fast]},
-        "council":      {"fallback": [glm_fast, ds_fast]},
-        "designer":     {"fallback": [glm_fast, ds_fast]},
-        # Primary already GLM-5.3-Flash -> drop to the cheap model.
-        "librarian":    {"fallback": [ds_fast]},
-        "fixer":        {"fallback": [ds_fast]},
-        "explorer":     {"fallback": [ds_fast]},
-    }
-    cfg = {
-        "enabled": True,
-        "defaultFallback": [glm_fast, ds_fast],
-        "agents": agents,
-    }
-    with open(fb_path, "w") as f:
-        json.dump(cfg, f, indent=2)
-        f.write("\n")
-    print("  fallback chains written (GLM-5.3 -> GLM-5.3-Flash -> DeepSeek-V4-Flash)")
-
-# Register the plugin (unpinned, tracks latest), same as omod-slim.
-oc_path = os.path.join(home, ".config/opencode/opencode.json")
-try:
-    with open(oc_path) as f:
-        oc = json.load(f)
-except (FileNotFoundError, json.JSONDecodeError):
-    oc = {}
-plugins = [p for p in oc.get("plugin", []) if p != "opencode-auto-fallback"]
-plugins.append("opencode-auto-fallback")
-oc["plugin"] = plugins
-with open(oc_path, "w") as f:
-    json.dump(oc, f, indent=2)
-    f.write("\n")
-print("  opencode-auto-fallback plugin registered")
-PYEOF
-  echo "  automatic model fallback configured."
 }
