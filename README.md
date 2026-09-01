@@ -121,7 +121,6 @@ is skipped with a warning.
 - **uv** (Python package manager)
 - **Rust** / Cargo (+ `LIBCLANG_PATH` for bindgen)
 - **rtk** (Rust Token Killer - LLM token proxy), with hooks for opencode + Cursor
-- **paseo** (`@getpaseo/cli@beta`)
 - git identity (name + email) configured globally
 - `bin/droid-export` and `bin/devpod-bundle` symlinked into `~/.local/bin`
 
@@ -134,7 +133,7 @@ apt:
   **tmux**, **gh** (as `github-cli`), **croc**, **uv** (best-effort via pacman)
 - **paru** (AUR helper, built from the AUR if missing)
 - **rtk** (via AUR `rtk-bin`, falling back to the official curl installer)
-- everything else (nvm + Node.js 26, pnpm, droid, jcode, carry, paseo, Rust/Cargo,
+- everything else (nvm + Node.js 26, pnpm, droid, jcode, Rust/Cargo,
   Cursor CLI, skills, Baseten CLI, truss venv) installs exactly as in `setup.sh`
 
 ### macOS (`brew-setup.sh`)
@@ -143,8 +142,8 @@ apt:
 - Homebrew casks: `brave-browser@beta grok-build ghostty font-jetbrains-mono-nerd-font`
 - `~/.baseten_aliases` created if missing; the managed `ksh` shell helper is
   (re)written and a copy kept in the repo for version control
-- **opencode** and **droid** (npm), **cursor-cli** (official curl installer),
-  **paseo** (npm)
+- **droid** (npm), **cursor-cli** (official curl installer)
+- **jcode** and **carry** built from source (see above)
 ## tmux config (`tmux.conf`)
 
 Tuned for running TUI agents (jcode, Droid, Claude Code) inside tmux,

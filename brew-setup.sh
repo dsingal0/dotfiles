@@ -16,7 +16,7 @@ brew tap basetenlabs/baseten
 brew trust basetenlabs/baseten 2>/dev/null || true
 
 # Packages to install and keep up to date
-# `node` provides npm, used below to install paseo.
+# `node` provides npm, used below to install droid.
 # `baseten` = basetenlabs/baseten-cli (https://github.com/basetenlabs/baseten-cli); `uv` for ~/venv + truss.
 FORMULAS=(baseten btop croc gh node mole pnpm rtk tmux uv)
 # ghostty = terminal emulator. grok-build has no official curl installer, so it
@@ -49,7 +49,10 @@ export PATH="$PNPM_HOME/bin:$PATH"
 # Uninstall the npm-managed copies of packages now handled by pnpm, so no
 # stale npm binaries linger on PATH. opencode is still npm-managed (postinstall
 # must run); drop droid/paseo here so they don't shadow the pnpm/npm swap below.
+# paseo removed 2026-09 (will be replaced by carry); drop stale copies.
 npm uninstall -g droid @getpaseo/cli 2>/dev/null || true
+pnpm_remove_global @getpaseo/cli
+rm -f "$HOME/.local/bin/paseo" 2>/dev/null || true
 
 # 2026-09 pivot: opencode + oh-my-openagent (OmO) fully removed. jcode (our
 # fork, built from source via cargo) is the primary coding agent; carry (PTY
@@ -169,10 +172,6 @@ baseten --version 2>/dev/null || baseten version 2>/dev/null || true
 # ~/venv with truss (Baseten model authoring / deploy-loop)
 ensure_venv
 
-# Install paseo CLI via npm (pre-release track via the `beta` dist-tag).
-# npm is used instead of pnpm because npm always runs postinstall scripts.
-pnpm_remove_global @getpaseo/cli
-npm install -g @getpaseo/cli@beta
 
 # Remove stale downloads and old versions
 brew cleanup --prune=all || echo "Warning: brew cleanup failed (continuing)"
