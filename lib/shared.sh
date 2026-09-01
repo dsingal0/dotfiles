@@ -1136,8 +1136,7 @@ ensure_croc() {
 
 # ============================================================================
 # 2026-09 stack: opencode v2 (opencode2, @opencode-ai/cli beta channel) +
-# oh-my-opencode-slim (agent orchestration plugin). jcode/carry remain
-# installed manually; they are not bootstrapped anymore.
+# oh-my-opencode-slim (agent orchestration plugin).
 # ============================================================================
 
 # Install/update opencode v2 (@opencode-ai/cli, bin `opencode2`) from the
@@ -1191,25 +1190,22 @@ install_opencode_v2() {
   return 0
 }
 
-# Install oh-my-opencode-slim (agent orchestration plugin) and pin the exact
-# version in ~/.config/opencode/opencode.json — v2 auto-refreshes unpinned
-# plugins, and slim recommends pinning while both projects move fast.
+# Install oh-my-opencode-slim (agent orchestration plugin), tracking the
+# latest published version (unpinned — v2 auto-refreshes unpinned plugins on
+# startup, which is what we want here).
 # Uses bunx when bun exists, else npx (the published CLI is a Node bundle).
 install_omod_slim() {
-  local slim_version
-  slim_version="$(npm view oh-my-opencode-slim version 2>/dev/null || echo "2.2.17")"
-  echo "Installing oh-my-opencode-slim@$slim_version..."
+  echo "Installing oh-my-opencode-slim@latest..."
   if command -v bun >/dev/null 2>&1; then
-    bunx "oh-my-opencode-slim@$slim_version" install || \
+    bunx "oh-my-opencode-slim@latest" install || \
       echo "WARNING: slim installer reported errors (continuing)." >&2
   else
-    npx --yes "oh-my-opencode-slim@$slim_version" install || \
+    npx --yes "oh-my-opencode-slim@latest" install || \
       echo "WARNING: slim installer reported errors (continuing)." >&2
   fi
-  # Pin the version in the opencode config (v2 refreshes unpinned plugins).
-  SLIM_VERSION="$slim_version" python3 - << 'PYEOF'
-import json, os, sys
-version = os.environ["SLIM_VERSION"]
+  # Register the plugin unpinned in the opencode config (tracks latest).
+  python3 - << 'PYEOF'
+import json, os
 path = os.path.expanduser("~/.config/opencode/opencode.json")
 try:
     with open(path) as f:
@@ -1217,13 +1213,13 @@ try:
 except (FileNotFoundError, json.JSONDecodeError):
     cfg = {}
 plugins = [p for p in cfg.get("plugin", []) if not str(p).startswith("oh-my-opencode-slim")]
-entry = "oh-my-opencode-slim@" + version
-plugins.append(entry)
+plugins.append("oh-my-opencode-slim")
 cfg["plugin"] = plugins
 with open(path, "w") as f:
     json.dump(cfg, f, indent=2)
-    f.write("\n")
-print("  slim pinned:", entry)
+    f.write("
+")
+print("  slim registered (unpinned, tracks latest)")
 PYEOF
   echo "  oh-my-opencode-slim installed."
 }
@@ -1258,101 +1254,3 @@ PYEOF
   done
 }
 
-# Configure jcode providers: Baseten (primary, with the intelligence-ordered
-# model chain from docs/decisions.md) plus dormant OpenRouter fallback.
-# Reads BASETEN_API_KEY / OPENROUTER_API_KEY from the env (callers source .env).
-# Uses `jcode provider add` so keys land in jcode's private env file.
-configure_jcode_providers() {
-  command -v jcode >/dev/null 2>&1 || { echo "WARNING: jcode not on PATH; skipping provider config"; return 0; }
-
-  if [[ -n "${BASETEN_API_KEY:-}" ]]; then
-    echo "  configuring jcode baseten profile (GLM-5.3 chain)..."
-    printf '%s' "$BASETEN_API_KEY" | jcode provider add baseten-byok \
-      --provider baseten \
-      --base-url https://inference.baseten.co/v1 \
-      --model "zai-org/GLM-5.3" \
-      --api-key-stdin --quiet 2>/dev/null \
-    || jcode provider add baseten-byok \
-      --provider baseten \
-      --base-url https://inference.baseten.co/v1 \
-      --model "zai-org/GLM-5.3" \
-      --api-key "$BASETEN_API_KEY" --quiet 2>/dev/null \
-    || echo "  WARNING: jcode baseten provider setup failed (run: jcode provider add baseten-byok ...)"
-  else
-    echo "  NOTE: BASETEN_API_KEY not set; skipping jcode baseten provider."
-  fi
-
-  # Meta (Meta Muse) — key persisted to shell rc when present.
-  if [[ -n "${META_API_KEY:-}" ]]; then
-    jcode provider add meta --provider meta-muse \
-      --model "muse-spark-1.2-contributor" \
-      --api-key "$META_API_KEY" --quiet 2>/dev/null \
-      || echo "  NOTE: meta provider setup failed (may need OAuth: jcode /login meta)"
-  fi
-
-  # OpenRouter stays dormant until OPENROUTER_API_KEY exists.
-  if [[ -n "${OPENROUTER_API_KEY:-}" ]]; then
-    jcode provider add openrouter-free --provider openrouter \
-      --base-url https://openrouter.ai/api/v1 \
-      --model "nvidia/nemotron-3-ultra-550b-a55b:free" \
-      --api-key "$OPENROUTER_API_KEY" --quiet 2>/dev/null || true
-  fi
-}
-
-# Install carry (the remote-control daemon the phone app pairs with) from
-# source. NOT called by the bootstrap scripts by default (the repo is private
-# and needs GitHub auth); run manually when needed:
-#   . lib/shared.sh && ensure_carry Repo expected at ~/repos/remote_agent (cloned/updated if missing).
-# Installs both `carry` (CLI + daemon) into ~/.local/bin and prints next steps.
-ensure_carry() {
-  local repo="${CARRY_REPO:-$HOME/repos/remote_agent}"
-
-  if ! command -v cargo >/dev/null 2>&1; then
-    echo "cargo not found; installing rustup (needed to build carry)..."
-    curl --proto '=https' --tlvs 2>/dev/null || true
-  fi
-  # Re-check after potential install by jcode step; share the same toolchain.
-  if ! command -v cargo >/dev/null 2>&1; then
-    curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain stable
-    export PATH="$HOME/.cargo/bin:$PATH"
-  fi
-  command -v cargo >/dev/null 2>&1 || { echo "WARNING: cargo unavailable; cannot build carry" >&2; return 0; }
-
-  if [[ -d "$repo/.git" ]]; then
-    echo "Updating carry repo at $repo..."
-    git -C "$repo" fetch origin 2>/dev/null || true
-    git -C "$repo" pull --ff-only 2>/dev/null || true
-  else
-    mkdir -p "$(dirname "$repo")"
-    local url
-    url="$(github_clone_url dsingal0/remote_agent)"
-    echo "Cloning carry (dsingal0/remote_agent) to $repo..."
-    if ! git clone "$url" "$repo"; then
-      echo "ERROR: could not clone dsingal0/remote_agent (private repo)." >&2
-      echo "  The carry daemon source needs GitHub auth, which lands on this" >&2
-      echo "  machine only after 'devpod-bundle --restore'. Two ways forward:" >&2
-      echo "    1. Add GITHUB_TOKEN=<token with repo scope> to .env and re-run setup" >&2
-      echo "    2. Re-run setup after devpod-bundle restores your SSH keys" >&2
-      echo "  Skipping carry build for now." >&2
-      return 0
-    fi
-  fi
-
-  echo "Building carry (release)..."
-  if (cd "$repo" && cargo build --release -p carry-cli 2>&1 | tail -1); then
-    mkdir -p "$HOME/.local/bin"
-    install -m 755 "$repo/target/release/carry" "$HOME/.local/bin/carry"
-    export PATH="$HOME/.local/bin:$PATH"
-    persist_local_bin
-    echo "  carry installed: $HOME/.local/bin/carry"
-    echo ""
-    echo "  Next steps for the phone app:"
-    echo "    1. Start the daemon:   carry daemon start"
-    echo "       (prints the iroh Node ID and a 6-digit pairing code)"
-    echo "    2. In the app: Pair -> carry mode -> paste Node ID + code"
-    echo "    3. Sessions:           carry session new --cmd jcode"
-  else
-    echo "WARNING: carry build failed; see output above." >&2
-  fi
-  return 0
-}
