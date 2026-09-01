@@ -144,11 +144,6 @@ labels+=("opencode settings")
 abs_paths+=("$HOME_DIR/.config/opencode/oh-my-opencode-slim.json")
 labels+=("oh-my-opencode-slim plugin settings")
 
-# oh-my-openagent (OmO) data + config (v1-only, no longer installed)
-abs_paths+=("$HOME_DIR/.omo")
-abs_paths+=("$HOME_DIR/.config/oh-my-openagent")
-labels+=("oh-my-openagent data (dir)")
-labels+=("oh-my-openagent config")
 
 # factory droid
 abs_paths+=(
