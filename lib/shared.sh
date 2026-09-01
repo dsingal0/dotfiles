@@ -1023,10 +1023,10 @@ install_opencode_v2() {
 install_omod_slim() {
   echo "Installing oh-my-opencode-slim@latest..."
   if command -v bun >/dev/null 2>&1; then
-    bunx "oh-my-opencode-slim@latest" install --companion=yes <<< "N" || \
+    bunx "oh-my-opencode-slim@latest" install --companion=no <<< "N" || \
       echo "WARNING: slim installer reported errors (continuing)." >&2
   else
-    npx --yes "oh-my-opencode-slim@latest" install --companion=yes <<< "N" || \
+    npx --yes "oh-my-opencode-slim@latest" install --companion=no <<< "N" || \
       echo "WARNING: slim installer reported errors (continuing)." >&2
   fi
   # Register the plugin unpinned in the opencode config (tracks latest).
