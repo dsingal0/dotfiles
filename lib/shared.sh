@@ -1249,6 +1249,48 @@ PYEOF
   echo "  oh-my-opencode-slim installed."
 }
 
+
+# Overwrite the slim plugin's auto-generated preset (defaults to openai /
+# gpt-5.6-* which don't apply here) with our Baseten chain.
+configure_omod_slim_preset() {
+  mkdir -p ~/.config/opencode
+  python3 /dev/stdin << 'INNEREOF'
+import json, os
+path = os.path.expanduser("~/.config/opencode/oh-my-opencode-slim.json")
+try:
+    with open(path) as f:
+        cfg = json.load(f)
+except (FileNotFoundError, json.JSONDecodeError):
+    cfg = {}
+cfg["preset"] = "baseten"
+cfg["presets"] = {
+    "baseten": {
+        "orchestrator": {"model": "baseten/zai-org/GLM-5.3"},
+        "oracle": {"model": "baseten/zai-org/GLM-5.3"},
+        "council": {"model": "baseten/zai-org/GLM-5.3"},
+        "librarian": {"model": "baseten/zai-org/GLM-5.3-Flash"},
+        "designer": {"model": "baseten/zai-org/GLM-5.3"},
+        "fixer": {"model": "baseten/zai-org/GLM-5.3-Flash"},
+        "explorer": {"model": "baseten/zai-org/GLM-5.3-Flash"},
+    },
+    "baseten-fast": {
+        "orchestrator": {"model": "baseten/zai-org/GLM-5.3-Flash"},
+        "oracle": {"model": "baseten/zai-org/GLM-5.3-Flash"},
+        "council": {"model": "baseten/zai-org/GLM-5.3-Flash"},
+        "librarian": {"model": "baseten/deepseek-ai/DeepSeek-V4-Flash-0731"},
+        "designer": {"model": "baseten/zai-org/GLM-5.3-Flash"},
+        "fixer": {"model": "baseten/zai-org/GLM-5.3-Flash"},
+        "explorer": {"model": "baseten/deepseek-ai/DeepSeek-V4-Flash-0731"},
+    },
+}
+with open(path, "w") as f:
+    json.dump(cfg, f, indent=2)
+    f.write("
+")
+print("  slim preset set to baseten (GLM-5.3 chain)")
+INNEREOF
+}
+
 # Persist ~/.local/bin onto PATH in shell rc files (managed block).
 persist_local_bin() {
   local rc_files=("$HOME/.bashrc")
