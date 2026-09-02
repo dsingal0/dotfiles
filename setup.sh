@@ -78,6 +78,7 @@ uninstall_opencode_all_node_versions
 uninstall_opencode_and_omo
 install_opencode_v2
 install_omod_slim
+configure_opencode_permission
 configure_omod_slim_presets
 
 # Install/update Meta CLI.
