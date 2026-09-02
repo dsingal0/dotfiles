@@ -330,14 +330,16 @@ BASE_URL = "https://inference.baseten.co/v1"
 # validated against each model's supported set. Supported sets are from
 # https://docs.baseten.co/inference/model-apis/reasoning.
 REASONING_EFFORT_SUPPORTED = {
-    "deepseek-ai/DeepSeek-V4-Pro": {"none", "minimal", "low", "medium", "high", "xhigh", "max"},
-    "moonshotai/Kimi-K3": {"none", "low", "high", "max"},
+    "deepseek-ai/DeepSeek-V4-Pro-0813": {"none", "minimal", "low", "medium", "high", "xhigh", "max"},
+    "zai-org/GLM-5.3": {"none", "high", "max"},
+    "zai-org/GLM-5.3-Flash": {"none", "high", "max"},
     "zai-org/GLM-5.2": {"none", "high", "max"},
     "zai-org/GLM-5.2-Fast": {"none", "high", "max"},
 }
 REASONING_EFFORT_VALUE = {
-    "deepseek-ai/DeepSeek-V4-Pro": "high",
-    "moonshotai/Kimi-K3": "high",
+    "deepseek-ai/DeepSeek-V4-Pro-0813": "high",
+    "zai-org/GLM-5.3": "high",
+    "zai-org/GLM-5.3-Flash": "high",
     "zai-org/GLM-5.2": "high",
     "zai-org/GLM-5.2-Fast": "high",
 }
@@ -374,9 +376,10 @@ def baseten_model(model, display_name, no_image, max_output):
 # Per-model max output mirrors /v1/models max_completion_tokens. extraArgs is
 # derived from REASONING_EFFORT_VALUE / ENABLE_THINKING above.
 baseten_models = [
-    baseten_model("deepseek-ai/DeepSeek-V4-Pro", "DeepSeek V4 Pro [Baseten]", True, 262144),
+    baseten_model("zai-org/GLM-5.3", "GLM 5.3 [Baseten]", True, 262144),
+    baseten_model("zai-org/GLM-5.3-Flash", "GLM 5.3 Flash [Baseten]", True, 262144),
+    baseten_model("deepseek-ai/DeepSeek-V4-Pro-0813", "DeepSeek V4 Pro [Baseten]", True, 262144),
     baseten_model("deepseek-ai/DeepSeek-V4-Flash-0731", "DeepSeek V4 Flash [Baseten]", True, 1048576),
-    baseten_model("moonshotai/Kimi-K3", "Kimi K3 [Baseten]", False, 262144),
     baseten_model("nvidia/NVIDIA-Nemotron-3-Ultra-550B-A55B", "Nemotron Ultra [Baseten]", True, 202800),
     baseten_model("zai-org/GLM-5.2", "GLM 5.2 [Baseten]", True, 262144),
     baseten_model("zai-org/GLM-5.2-Fast", "GLM 5.2 Fast [Baseten]", True, 262144),
@@ -411,6 +414,21 @@ for m in baseten_models:
     else:
         print("  added Baseten model: %s" % name)
         settings["customModels"].append(m)
+
+# Truly YOLO: default every new droid session to full autonomy (the
+# interactive --auto high equivalent — no permission prompts), and trust
+# everything under $HOME so droid never asks to trust a home-dir folder.
+from datetime import datetime, timezone
+settings.setdefault("sessionDefaultSettings", {})
+settings["sessionDefaultSettings"].update({
+    "autonomyMode": "auto-high",
+    "interactionMode": "auto",
+    "autonomyLevel": "high",
+})
+settings.setdefault("trustedFolders", {})
+settings["trustedFolders"].setdefault(os.path.expanduser("~"), {
+    "trustedAt": datetime.now(timezone.utc).isoformat(timespec="milliseconds").replace("+00:00", "Z"),
+})
 
 with open(settings_path, "w") as f:
     json.dump(settings, f, indent=2)
@@ -526,6 +544,14 @@ configure_cursor() {
     '# <<< cursor env <<<' \
     "$source_line"
 
+  # Truly YOLO: cursor-agent has no persisted permission setting — --yolo
+  # auto-approves every tool call and --approve-mcps auto-approves MCP
+  # servers — so wrap it in an alias for interactive shells.
+  write_managed_rc_block \
+    '# >>> cursor-agent yolo alias (managed by dotfiles setup) >>>' \
+    '# <<< cursor-agent yolo alias <<<' \
+    "alias cursor-agent='cursor-agent --yolo --approve-mcps'"
+
   # Linux: cursor-agent reads ~/.config/cursor/auth.json; a restored bundle puts
   # the file at ~/.cursor/auth.json, so bridge the two.
   if [[ "$(uname -s)" != "Darwin" && -f "$HOME/.cursor/auth.json" ]]; then
@@ -542,6 +568,36 @@ configure_cursor() {
     echo "      printf 'export CURSOR_API_KEY=crsr_...\\n' > ~/.cursor/env && chmod 600 ~/.cursor/env"
     echo "      or restore it via: devpod-bundle --restore <bundle>.tar.gz"
   fi
+}
+
+# Truly YOLO for grok-build: set ~/.grok/config.toml [ui] permission_mode =
+# "always-approve" so the grok CLI auto-approves all tool executions
+# (verified key per docs.x.ai/build settings reference). Idempotent merge:
+# replaces an existing permission_mode, adds the [ui] section if missing,
+# and leaves every other TOML key alone. Harmless when grok isn't installed.
+configure_grok_yolo() {
+  mkdir -p "$HOME/.grok"
+  python3 - << 'PYEOF'
+import os, re
+path = os.path.expanduser("~/.grok/config.toml")
+try:
+    with open(path) as f:
+        text = f.read()
+except FileNotFoundError:
+    text = ""
+if re.search(r'^\s*permission_mode\s*=', text, re.M):
+    text = re.sub(r'^(\s*permission_mode\s*=\s*).*$',
+                  r'\1"always-approve"', text, count=1, flags=re.M)
+elif re.search(r'^\[ui\]\s*$', text, re.M):
+    text = re.sub(r'^(\[ui\]\s*)$',
+                  r'\1\npermission_mode = "always-approve"',
+                  text, count=1, flags=re.M)
+else:
+    text = text.rstrip("\n") + ("\n\n" if text else "") + '[ui]\npermission_mode = "always-approve"\n'
+with open(path, "w") as f:
+    f.write(text)
+print("  grok permission_mode = always-approve")
+PYEOF
 }
 
 # Symlink every skill under <repo>/skills/<name>/SKILL.md into each harness's
@@ -1125,9 +1181,10 @@ heavy = [glm53, glm53f, ds_pro, ds_flash] + baseten_tail + free_floor
 light = [glm53f, ds_pro, ds_flash] + baseten_tail + free_floor
 
 # One preset; per-agent chains. Format: presets.default.<agent> = {model: [chain]}
-# permission: "allow" lifts the plugin's per-agent tool restrictions (e.g.
-# explorer read-only) so every agent can edit, bash, webfetch — anything.
-allow = {"permission": "allow"}
+# Truly YOLO: permission "allow" lifts the plugin's per-agent tool
+# restrictions (e.g. explorer read-only), and skills/mcps ["*"] gives every
+# agent all skills and all MCP servers — no gating of any kind.
+allow = {"permission": "allow", "skills": ["*"], "mcps": ["*"]}
 cfg["presets"] = {
     "default": {
         "orchestrator": {"model": heavy, **allow},

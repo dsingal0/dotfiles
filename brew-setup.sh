@@ -135,6 +135,7 @@ cursor --version 2>/dev/null || true
 # Keys can also be exported directly: BASETEN_API_KEY=... FACTORY_API_KEY=... ./brew-setup.sh
 configure_factory "$SCRIPT_DIR"
 configure_cursor
+configure_grok_yolo
 
 # Remove the stale third-party baseten skill (basetenlabs/baseten-skills) so the
 # repo's static, pruned, BIS-focused copy (skills/baseten/) gets symlinked in
