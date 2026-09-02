@@ -165,12 +165,18 @@ PYEOF
   echo "  opencode baseten provider configured (inference.baseten.co/v1)"
 }
 
-# Ensure ~/.config/opencode/opencode.json has permission: allow (merged with
-# any existing keys, e.g. an mcp servers block set elsewhere), and
-# autoupdate: true so opencode itself always tracks the latest version.
-# Validated against the v2 schema (https://opencode.ai/config.json): the key
-# is `permission` (singular) with shorthand allow/ask/deny — there is no
-# top-level `permissions` rule-array in the shipped schema.
+# Ensure ~/.config/opencode/opencode.json allows every action on every
+# resource (v2 permissions rule array), and autoupdate: true so opencode
+# itself always tracks the latest version.
+#
+# v2 permissions are an ORDERED array of {action, resource, effect} rules;
+# no matching rule => ask. The old v1-style `permission` shorthand key is
+# IGNORED by the v2 runtime (docs: use `permissions`, not `permission`),
+# so it is removed. Rules: last matching wins; global rules are appended
+# after built-in defaults, and agent-specific rules are appended after
+# global ones — so shipped agents (build/plan/general/explore, which ask
+# for external directories) also get per-agent allow-all rules to fully
+# suppress prompts.
 configure_opencode_permission() {
   mkdir -p ~/.config/opencode
   python3 - << 'PYEOF'
@@ -184,8 +190,16 @@ except (FileNotFoundError, json.JSONDecodeError):
     config = {}
 
 config.setdefault("$schema", "https://opencode.ai/config.json")
-config["permission"] = "allow"
+config.pop("permission", None)  # v1-only key; the v2 runtime ignores it
+allow_all = [{"action": "*", "resource": "*", "effect": "allow"}]
+config["permissions"] = allow_all
 config["autoupdate"] = True
+
+# Shipped agents carry their own policies (e.g. ask on external_directory)
+# that would override the global rule; append per-agent allow-all too.
+config.setdefault("agents", {})
+for agent_id in ("build", "plan", "general", "explore"):
+    config["agents"].setdefault(agent_id, {})["permissions"] = allow_all
 
 with open(path, "w") as f:
     json.dump(config, f, indent=2)
