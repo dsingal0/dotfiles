@@ -1142,9 +1142,9 @@ persist_opencode_env() {
 
 # Write oh-my-opencode-slim per-agent model fallback chains into the opencode
 # config. One preset ("default"): each agent gets an intelligence-ordered
-# chain — its usual tier first (GLM-5.3 for reasoning agents, GLM-5.3-Flash
-# for explorer/fixer/librarian), then progressively cheaper Baseten models,
-# ending on free opencode/OpenRouter models. The slim plugin's
+# chain — GLM-5.3-Flash first, then GLM-5.3 (heavy reasoning agents only),
+# then progressively cheaper Baseten models, ending on free
+# opencode/OpenRouter models. The slim plugin's
 # ForegroundFallbackManager walks the chain on rate limits / failures.
 # Every agent also gets permission "allow" — no tool-level restrictions,
 # on top of the global permission: "allow" in opencode.json.
@@ -1177,7 +1177,7 @@ free_floor = [
     "openrouter/meta-llama/llama-3.3-70b-instruct:free",
     "openrouter/qwen/qwen3-32b:free",
 ]
-heavy = [glm53, glm53f, ds_pro, ds_flash] + baseten_tail + free_floor
+heavy = [glm53f, glm53, ds_pro, ds_flash] + baseten_tail + free_floor
 light = [glm53f, ds_pro, ds_flash] + baseten_tail + free_floor
 
 # One preset; per-agent chains. Format: presets.default.<agent> = {model: [chain]}
