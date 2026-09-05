@@ -28,11 +28,11 @@ cd ~/dotfiles
 ./brew-setup.sh
 ```
 
-### Baseten API key (used by droid, opencode, and Factory custom models)
+### Baseten API key (used by omp, droid, and Factory custom models)
 
-Wires Baseten-hosted models into Factory droid custom models
-(`~/.factory/settings.json`) and the opencode Baseten provider
-(`~/.config/opencode/opencode.json`). Provide an API key:
+Wires Baseten-hosted models into the omp provider config
+(`~/.omp/agent/models.yml`) and Factory droid custom models
+(`~/.factory/settings.json`). Provide an API key:
 
 ```bash
 cp .env.example .env
@@ -52,31 +52,32 @@ present), so:
 - **new shells** get it automatically,
 - **existing shells** need `source ~/.bashrc` (or a new terminal).
 
-Both keys are gitignored and never committed.
+Keys live in `.env` (tracked; the repo is private) and are embedded into the
+generated harness configs at setup time.
 
 ## Repository layout
 
 ```
 .
-├── setup.sh           # Linux bootstrap (apt, nvm, rust, droid, opencode v2, ...)
+├── setup.sh           # Linux bootstrap (apt, nvm, rust, droid, omp, ...)
 ├── setup-arch.sh      # Arch Linux bootstrap (pacman + paru/AUR, same toolchain)
 ├── brew-setup.sh      # macOS bootstrap (Homebrew formulae + casks)
 ├── lib/
-│   └── shared.sh      # sourced by all bootstraps: opencode v2 + omod-slim
-│                      #   installers, Baseten provider config, skills, runlayer MCP
+│   └── shared.sh      # sourced by all bootstraps: omp installer + model
+│                      #   config, skills, runlayer MCP, Baseten BYOK models
 ├── bin/
-│   └── devpod-bundle  # pack/restore SSH + opencode/factory/cursor/grok/truss
+│   └── devpod-bundle  # pack/restore SSH + omp/factory/cursor/grok/truss
 │                      #   auth+settings for Mac <-> dev pod sync
 ├── devpod-bundle -> bin/devpod-bundle   (run from repo root on any host)
 ├── clone_runtimes.sh  # shallow-clone the Baseten/vLLM/TensorRT-LLM repos into ~/repos
 ├── config/
-│   └── opencode/
-│       └── AGENTS.md  # global opencode rules, symlinked into ~/.config/opencode
+│   └── omp/
+│       └── AGENTS.md  # global omp rules, symlinked into ~/.omp/agent
 ├── skills/            # personal skills, symlinked into every agent harness
 ├── baseten_aliases    # kubectl / shell aliases for the baseten monorepo
 ├── tmux.conf          # symlinked to ~/.tmux.conf
 ├── ghostty.conf       # symlinked to ~/.config/ghostty/config (macOS)
-├── .env.example       # template for BASETEN_API_KEY / FACTORY_API_KEY
+├── .env.example       # template for BASETEN_API_KEY / FACTORY_API_KEY / ...
 ├── dsingal-dev-pod-b300.yaml  # dev pod spec
 └── README.md
 ```
@@ -85,26 +86,30 @@ Both keys are gitignored and never committed.
 
 ### Both platforms (via `lib/shared.sh`)
 
-- **opencode v2** (`@opencode-ai/cli`, bin `opencode2`) plus the
-  **oh-my-opencode-slim** orchestration plugin, with the Baseten provider
-  written to `~/.config/opencode/opencode.json` (requires `BASETEN_API_KEY`).
-  Stale v1 / OmO copies across all nvm node version dirs are removed first.
+- **omp** (oh-my-pi, `@oh-my-pi/pi-coding-agent`), the coding harness: vanilla
+  setup — no custom agents, no plugins. `configure_omp` writes
+  `~/.omp/agent/models.yml` (Baseten provider + OpenRouter free floor,
+  requires `BASETEN_API_KEY`) and `~/.omp/agent/config.yml` (model roles +
+  the 7-model fallback chain, Flash head). The repo's global rules are
+  symlinked to `~/.omp/agent/AGENTS.md`.
 - **droid** (Factory CLI) via npm, with Baseten BYOK custom models written to
   `~/.factory/settings.json` (requires `BASETEN_API_KEY`).
 - **FACTORY_API_KEY** and **FACTORY_DISABLE_KEYRING=1** persisted to shell rc
   files so droid stores auth in the portable `~/.factory/auth.v2.file` +
   `auth.v2.key` pair instead of the macOS login keychain.
-- **runlayer MCP** configured in opencode, droid, and cursor.
+- **runlayer MCP** configured in omp, droid, and cursor.
 - **git identity** (name + email) configured globally.
-- **rtk** (Rust Token Killer - LLM token proxy), initialized for opencode
-  (plugin) and Cursor (preToolUse hook). Note: rtk has no native
+- **rtk** (Rust Token Killer - LLM token proxy), initialized for omp
+  (Pi coding agent) and Cursor (preToolUse hook). Note: rtk has no native
   Droid/Factory integration; Droid is not wired here.
 - **~/venv** (via `uv`) with **truss** (Baseten model authoring / deploy-loop).
 - Personal skills from the repo's `skills/` directory, symlinked into every
-  harness (`~/.factory/skills/`, `~/.config/opencode/skills/`,
+  harness (`~/.factory/skills/`, `~/.omp/agent/skills/`,
   `~/.cursor/skills/`, and `~/.grok/skills/` on macOS). Design skills
   (`frontend-design`) are skipped on Linux dev pods and installed only by
-  `brew-setup.sh`.
+  `brew-setup.sh`. Third-party packs (mattpocock, expo, emilkowalski on
+  macOS) are installed via the `skills` CLI into `~/.agents/skills/`
+  (`universal`), which omp reads natively.
 
 ### Linux (`setup.sh`)
 
@@ -139,7 +144,7 @@ apt:
 
 ## tmux config (`tmux.conf`)
 
-Tuned for running TUI agents (opencode, droid) inside tmux, including over SSH
+Tuned for running TUI agents (omp, droid) inside tmux, including over SSH
 to remote pods. Symlinked to `~/.tmux.conf` by both setup scripts. Highlights:
 
 - **mouse on** - wheel events pass through to mouse-tracking TUIs
@@ -158,12 +163,17 @@ format. A droid session lives at `~/.factory/sessions/<encoded-cwd>/<session-id>
 
 ## devpod-bundle (`bin/devpod-bundle`)
 
-Pack the auth + settings for SSH, opencode, Factory droid, Cursor CLI, grok
+Pack the auth + settings for SSH, omp, Factory droid, Cursor CLI, grok
 CLI, and truss (Baseten) into one tar.gz, croc it to a dev pod, and restore it
 there - so you only stay logged in on one machine (your Mac).
 
 Paths in the archive are relative to `$HOME`, so restore works on any pod
 regardless of username.
+
+**omp** config travels via `~/.omp/agent/models.yml` (Baseten key inline),
+`config.yml` (roles + fallback chain), and `mcp.json`; `--restore` verifies
+the inline apiKey landed. Skills and the `AGENTS.md` symlink come from the
+dotfiles repo on the pod, not from this bundle.
 
 **Cursor CLI** auth is file-based: set `AGENT_CLI_CREDENTIAL_STORE=file` so
 `cursor-agent` writes `~/.cursor/auth.json` on macOS (and reads
@@ -196,7 +206,7 @@ croc send ~/devpod-bundle-*.tar.gz
 
 ## Notes
 
-- The only coding harnesses installed are **opencode v2**, **droid**
+- The only coding harnesses installed are **omp**, **droid**
   (Factory CLI), **cursor-cli**, and **grok-build** (macOS only, Homebrew
   cask - it has no curl installer).
 - Herdr bash completions are regenerated on Linux if `herdr` is present

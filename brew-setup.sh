@@ -20,7 +20,6 @@ brew trust basetenlabs/baseten 2>/dev/null || true
 # `baseten` = basetenlabs/baseten-cli (https://github.com/basetenlabs/baseten-cli); `uv` for ~/venv + truss.
 FORMULAS=(baseten btop croc gh node mole rtk tmux uv)
 # ghostty = terminal emulator. grok-build has no official curl installer, so it
-# stays a cask; droid / opencode install via npm below, cursor-cli via curl.
 # font-jetbrains-mono-nerd-font = JetBrains Mono with Nerd Font glyphs for TUIs.
 CASKS=(brave-browser@beta ghostty font-jetbrains-mono-nerd-font)
 CASKS+=(grok-build)
@@ -30,28 +29,26 @@ for pkg in "${FORMULAS[@]}"; do
   brew install "$pkg" || echo "Warning: failed to install formula '$pkg' (continuing)"
 done
 
-# Source shared config helpers (opencode install + permission config, Baseten
-# BYOK models), deduplicated with setup.sh so both bootstrap scripts stay in
+# Source shared config helpers (omp install/config, Baseten BYOK models,
+# skills, MCP), deduplicated with setup.sh so both bootstrap scripts stay in
 # sync. Sourcing only defines functions, so it is safe to do this early.
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 . "$SCRIPT_DIR/lib/shared.sh"
 
 # Uninstall the npm-managed copies of packages so no stale npm binaries linger
-# on PATH. opencode is still npm-managed (postinstall
-# must run); drop droid/paseo here so they don't shadow the fresh npm installs below.
+# on PATH. Drop droid/paseo here so they don't shadow the fresh npm installs below.
 npm uninstall -g droid @getpaseo/cli 2>/dev/null || true
 
-# 2026-09 stack: opencode v2 (@opencode-ai/cli, bin opencode2) from the beta
-# channel + oh-my-opencode-slim (agent orchestration plugin). jcode/carry are
-# manual installs now; they are not part of bootstrap.
+# 2026-09 stack: omp (oh-my-pi, @oh-my-pi/pi-coding-agent) is the coding
+# harness. jcode/carry are manual installs; not part of bootstrap.
 load_env_file "$SCRIPT_DIR"
 
-uninstall_opencode_all_node_versions
-uninstall_opencode_and_omo
-install_opencode_v2
-install_omod_slim
-configure_opencode_permission
-configure_omod_slim_presets
+install_omp
+configure_omp
+
+# Install the repo's global omp instructions (~/.omp/agent/AGENTS.md) so
+# every project session follows the same global rules.
+install_global_agents_md "$SCRIPT_DIR"
 
 # Install/update Meta CLI.
 curl -fsSL https://dev.meta.ai/install.sh | bash
@@ -143,7 +140,7 @@ configure_grok_yolo
 # its place by install_shared_skills below.
 cleanup_stale_baseten_skill
 
-# Install personal skills into every harness (droid / opencode / cursor / grok)
+# Install personal skills into every harness (droid / omp / cursor / grok)
 install_shared_skills "$SCRIPT_DIR"
 
 # Third-party skill packs (mattpocock + expo + emilkowalski) for all agents. The

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# devpod-bundle - pack auth + settings for SSH, opencode, factory droid,
+# devpod-bundle - pack auth + settings for SSH, omp (oh-my-pi), factory droid,
 # cursor CLI, grok CLI, and truss (Baseten) into a single tar.gz so they can
 # be sent via croc to a dev pod and unpacked into the right locations.
 #
@@ -14,19 +14,18 @@
 #                       printed to stdout instead of littering ~).
 #
 # Paths in the archive are stored RELATIVE TO $HOME (e.g. ./.ssh/id_ed25519,
-# ./.local/share/opencode/auth.json), so on any pod you can also just:
+# ./.omp/agent/models.yml), so on any pod you can also just:
 #
 #     cd ~ && tar -xzf devpod-bundle-*.tar.gz
 #
 # regardless of the pod's username. The --restore mode does exactly that,
 # minus the RESTORE.txt note.
 #
-# opencode v2 (opencode2) auth normally lives in ~/.local/share/opencode/auth.json
-# (written by /connect). This dotfiles setup instead writes the Baseten API key
-# inline into the global opencode.json (provider.baseten.options.apiKey), which
-# is bundled too. cli.json settings are bundled as well. The script detects
-# whichever credential form is present and verifies it on restore. Only v2 is
-# installed now; the v1 (opencode-ai) cases are gone.
+# omp (oh-my-pi) config lives in ~/.omp/agent/ (models.yml with the Baseten
+# API key inline, config.yml with roles + fallback chain, mcp.json, and the
+# AGENTS.md symlink target config/omp/AGENTS.md from this dotfiles repo).
+# Bundling agent/ restores the full harness config on the pod; the models.yml
+# key is verified on restore.
 #
 # Cursor CLI (cursor-agent) auth is file-based: set AGENT_CLI_CREDENTIAL_STORE=file
 # so it writes ~/.cursor/auth.json on macOS (and reads ~/.config/cursor/auth.json
@@ -53,29 +52,25 @@ set -euo pipefail
 
 HOME_DIR="${HOME:?HOME is not set}"
 
-# Return 0 if the given opencode.json contains at least one provider with an
-# inline (non-{env:...}) apiKey — the way this dotfiles setup stores the Baseten
-# key (provider.baseten.options.apiKey). Return 1 otherwise. Used to detect and
-# verify opencode credentials when ~/.local/share/opencode/auth.json is absent.
-opencode_json_has_inline_key() {
+# Return 0 if the given omp models.yml contains at least one provider with an
+# inline apiKey — the way this dotfiles setup stores the Baseten key
+# (providers.baseten.apiKey). Return 1 otherwise. Used to verify omp
+# credentials on restore.
+omp_models_yml_has_inline_key() {
   local cfg="$1"
   [[ -f "$cfg" ]] || return 1
   python3 - "$cfg" <<'PYEOF'
-import json, sys
+import sys
 try:
     with open(sys.argv[1]) as f:
-        cfg = json.load(f)
+        for line in f:
+            s = line.split(":", 1)
+            if len(s) == 2 and s[0].strip() == "apiKey":
+                value = s[1].strip().strip('"').strip("'")
+                if value and not value.startswith("$"):
+                    sys.exit(0)
 except Exception:
     sys.exit(1)
-for prov in cfg.get("provider", {}).values():
-    if not isinstance(prov, dict):
-        continue
-    opts = prov.get("options", {})
-    if not isinstance(opts, dict):
-        continue
-    key = opts.get("apiKey")
-    if isinstance(key, str) and key and not key.startswith("{env:"):
-        sys.exit(0)
 sys.exit(1)
 PYEOF
 }
@@ -135,20 +130,14 @@ if [ -n "$RESTORE_FILE" ]; then
     echo "cursor auth: placed ~/.cursor/auth.json at ~/.config/cursor/auth.json (Linux path)"
   fi
 
-  # Verify opencode credentials landed. Standard store is auth.json (written by
-  # /connect); this dotfiles setup may instead carry the key inline in
-  # opencode.json (provider options.apiKey), which is bundled as "opencode settings".
-  if [ -f "$HOME_DIR/.local/share/opencode/auth.json" ]; then
-    echo "opencode auth: OK (~/.local/share/opencode/auth.json)"
-  elif opencode_json_has_inline_key "$HOME_DIR/.config/opencode/opencode.json"; then
-    echo "opencode auth: OK (inline apiKey in ~/.config/opencode/opencode.json)"
+  # Verify omp config landed (models.yml with an inline apiKey, written by
+  # configure_omp in the dotfiles setup).
+  if omp_models_yml_has_inline_key "$HOME_DIR/.omp/agent/models.yml"; then
+    echo "omp config: OK (~/.omp/agent/models.yml with inline apiKey)"
   else
-    echo "WARNING: no opencode credentials found after restore (no auth.json, no inline"
-    echo "         apiKey in opencode.json) — opencode will be unauthenticated on this pod."
-    echo "         Fix with: opencode2 auth login  (or add provider options.apiKey)."
+    echo "WARNING: no omp models.yml with an inline apiKey found after restore"
+    echo "         — run the dotfiles setup (configure_omp) on this pod."
   fi
-
-  echo "done."
 
   if tar -tzf "$RESTORE_FILE" | grep -qx 'RESTORE.txt'; then
     echo
@@ -174,21 +163,17 @@ labels=()
 abs_paths+=("$HOME_DIR/.ssh")
 labels+=("ssh (dir)")
 
-# opencode v2 credentials: the standard /connect store is auth.json; this
-# dotfiles setup instead writes the Baseten key inline into the global
-# opencode.json (provider.baseten.options.apiKey), which is bundled below as
-# "opencode settings". auth.json is bundled when present; the inline case is
-# detected and reported separately.
-abs_paths+=("$HOME_DIR/.local/share/opencode/auth.json")
-labels+=("opencode auth (auth.json, /connect)")
-abs_paths+=("$HOME_DIR/.config/opencode/cli.json")
-labels+=("opencode2 CLI/TUI settings")
-abs_paths+=("$HOME_DIR/.config/opencode/opencode.json")
-labels+=("opencode settings")
-
-# oh-my-opencode-slim plugin settings (per-agent model chains, presets)
-abs_paths+=("$HOME_DIR/.config/opencode/oh-my-opencode-slim.json")
-labels+=("oh-my-opencode-slim plugin settings")
+# omp (oh-my-pi): the whole agent config dir — models.yml (Baseten key inline),
+# config.yml (roles + fallback chain), mcp.json (runlayer), and the AGENTS.md
+# symlink. agent.db / history.db / caches are excluded (machine-local, huge).
+# Bundling models.yml + config.yml is what re-auths and re-configures omp on
+# the pod; --restore verifies the inline apiKey landed.
+abs_paths+=("$HOME_DIR/.omp/agent/models.yml")
+labels+=("omp models (Baseten provider, inline key)")
+abs_paths+=("$HOME_DIR/.omp/agent/config.yml")
+labels+=("omp roles + fallback chain")
+abs_paths+=("$HOME_DIR/.omp/agent/mcp.json")
+labels+=("omp MCP servers (runlayer)")
 
 
 # factory droid
@@ -264,16 +249,14 @@ for i in "${!abs_paths[@]}"; do
   present_labels+=("$lbl -> ~/$rel")
 done
 
-# How opencode credentials travel in this bundle. auth.json is the standard
-# /connect store; this setup instead writes the key inline into opencode.json
-# (bundled above as "opencode settings"). Warn loudly if neither exists.
-opencode_cred_note=""
-if [ -f "$HOME_DIR/.local/share/opencode/auth.json" ]; then
-  opencode_cred_note="opencode auth: bundled via ~/.local/share/opencode/auth.json"
-elif opencode_json_has_inline_key "$HOME_DIR/.config/opencode/opencode.json"; then
-  opencode_cred_note="opencode auth: bundled inline in ~/.config/opencode/opencode.json (provider options.apiKey)"
+# How omp credentials travel in this bundle: models.yml carries the Baseten
+# key inline (written by configure_omp in the dotfiles setup). Warn loudly
+# if it is missing.
+omp_cred_note=""
+if omp_models_yml_has_inline_key "$HOME_DIR/.omp/agent/models.yml"; then
+  omp_cred_note="omp auth: bundled inline in ~/.omp/agent/models.yml (providers.baseten.apiKey)"
 else
-  opencode_cred_note="WARNING: no opencode credentials found (no auth.json, no inline apiKey in opencode.json) — opencode will be unauthenticated on the pod"
+  omp_cred_note="WARNING: no omp models.yml with an inline apiKey found — omp will be unauthenticated on the pod"
 fi
 
 if [ ${#rel_paths[@]} -eq 0 ]; then
@@ -283,7 +266,7 @@ fi
 
 echo "Bundling from $HOME_DIR:"
 printf '  %s\n' "${present_labels[@]}"
-echo "  $opencode_cred_note"
+echo "  $omp_cred_note"
 if [ ${#missing[@]} -gt 0 ]; then
   echo "missing (skipped):"
   printf '  %s\n' "${missing[@]}" >&2
@@ -329,11 +312,12 @@ trap 'rm -rf "$TMP_BUNDLE"' EXIT
   echo "  - factory droid settings/preferences ARE bundled: settings.json"
   echo "    (custom models, session defaults, trusted folders), custom droids"
   echo "    (~/.factory/droids), and cron missions (~/.factory/crons)."
-  echo "  - opencode v2 credentials: bundled from ~/.local/share/opencode/auth.json"
-  echo "    (standard /connect store) and/or inline in the global opencode.json"
-  echo "    (provider options.apiKey, as this dotfiles setup writes). cli.json"
-  echo "    settings are bundled too. --restore verifies credentials landed."
-  echo "  - $opencode_cred_note"
+  echo "  - omp (oh-my-pi) config: bundled from ~/.omp/agent/ — models.yml"
+  echo "    (Baseten key inline, as this dotfiles setup writes), config.yml"
+  echo "    (roles + fallback chain), and mcp.json. --restore verifies the"
+  echo "    inline apiKey landed. Skills/AGENTS.md symlinks come from the"
+  echo "    dotfiles repo on the pod, not from this bundle."
+  echo "  - $omp_cred_note"
   echo "  - truss (Baseten) credentials ARE bundled via ~/.trussrc. If the"
   echo "    remote needs re-auth on the pod, run \`truss login\`."
 } > "$TMP_BUNDLE/RESTORE.txt"

@@ -6,230 +6,31 @@
 #   SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 #   . "$SCRIPT_DIR/lib/shared.sh"
 #
-# It exposes two functions that deduplicate the opencode permission config and
-# the Factory Baseten BYOK custom-models config previously inlined in both
-# bootstrap scripts.
+# It exposes the per-harness configuration functions (omp, droid/Factory,
+# cursor, grok) shared by the bootstrap scripts.
 
-# nvm node version dirs, if any. Empty when nvm isn't installed (brew-setup.sh
-# uses Homebrew node). Safe under `set -u` — never expands an unbound NVM_DIR.
-_nvm_node_version_dirs() {
-  local nvm_dir="${NVM_DIR:-$HOME/.nvm}"
-  [[ -d "$nvm_dir/versions/node" ]] || return 0
-  local d
-  for d in "$nvm_dir"/versions/node/*/; do
-    [[ -d "$d" ]] && printf '%s\n' "$d"
-  done
-}
-
-# Uninstall opencode (v1 opencode-ai -> `opencode`, v2 @opencode-ai/cli ->
-# `opencode2`) from EVERY nvm node version directory, not just the currently
-# active one. `npm uninstall -g` only touches the active node version, so
-# stale copies can linger in other version dirs and shadow the fresh install on
-# PATH. Also drops the old curl-installer copy (~/.opencode/bin). Idempotent.
-# Works without nvm (Homebrew / system node): skips the version-dir loop.
-uninstall_opencode_all_node_versions() {
-  echo "Uninstalling opencode (v1 + stale copies)..."
-  local node_dir bin_dir lib_dir
-  while IFS= read -r node_dir; do
-    [[ -n "$node_dir" ]] || continue
-    bin_dir="$node_dir/bin"
-    lib_dir="$node_dir/lib/node_modules"
-    rm -f "$bin_dir/opencode" "$bin_dir/opencode2" 2>/dev/null || true
-    rm -rf "$lib_dir/opencode-ai" "$lib_dir/@opencode-ai" 2>/dev/null || true
-  done < <(_nvm_node_version_dirs)
-  # Old curl installer (~/.opencode/bin/opencode) so the npm-managed binary is
-  # the one on PATH.
-  rm -f "$HOME/.opencode/bin/opencode" 2>/dev/null || true
-  rmdir "$HOME/.opencode/bin" 2>/dev/null || true
-  # Current npm prefix (Homebrew node, or the active nvm version). Idempotent.
-  npm uninstall -g opencode-ai @opencode-ai/cli >/dev/null 2>&1 || true
-}
-
-# Fully uninstall oh-my-openagent (OmO) remnants — the v1-only orchestration
-# plugin. Does NOT touch opencode v2's config or credentials (those live in
-# ~/.config/opencode and ~/.local/share/opencode and belong to the running v2
-# install). Idempotent.
-uninstall_opencode_and_omo() {
-  echo "Removing OmO (v1 orchestration plugin) remnants..."
-  # Kill lingering processes.
-  pkill -f "oh-my-open" 2>/dev/null || true
-
-  # Package-manager copies of the plugin.
-  npm uninstall -g oh-my-openagent oh-my-opencode 2>/dev/null || true
-
-  # Old curl/bun installer copies.
-  rm -rf "$HOME/.omo" "$HOME/.cache/oh-my-openagent" "$HOME/.config/oh-my-openagent" 2>/dev/null || true
-
-  echo "  OmO remnants removed."
-}
-
-# Persist `export <VAR>=<value>` into shell rc files (~/.bashrc always;
-
-# Ensure bun is available (oh-my-openagent's installer must run via `bunx`).
-# Prefers Homebrew on macOS; falls back to the official bun installer script.
-ensure_bun() {
-  if command -v bun >/dev/null 2>&1; then
-    return 0
-  fi
-  echo "Installing bun (oh-my-openagent requirement)..."
-  if command -v brew >/dev/null 2>&1; then
-    brew install oven-sh/bun/bun
-  else
-    curl -fsSL https://bun.sh/install | bash
-    export PATH="$HOME/.bun/bin:$PATH"
-  fi
-  command -v bun >/dev/null 2>&1 || {
-    echo "WARNING: bun still not on PATH; oh-my-openagent install will be skipped." >&2
-    return 1
-  }
-}
-
-# Ensure ~/.config/opencode/opencode.json has a `baseten` OpenAI-compatible
-# provider (https://inference.baseten.co/v1, the Baseten Model APIs) so opencode
-# and OmO can run Baseten-hosted models (GLM-5.2, DeepSeek-V4-Pro-0813, ...).
-# Reads BASETEN_API_KEY from the environment (callers source .env first). Skips
-# with a warning if the key is unset. Idempotent: merges with existing keys
-# (permission, mcp, plugin) instead of overwriting them.
-#
-# The model list mirrors configure_factory_models below; opencode also
-# auto-discovers whatever else the gateway serves via /v1/models.
-# NOTE: the GLM-5.3 model chain is also pinned in configure_omod_slim_presets
-# (oh-my-opencode-slim) — update both together when models change.
-# auto-discovers whatever else the gateway serves via /v1/models.
-configure_opencode_baseten_provider() {
-  if [[ -z "${BASETEN_API_KEY:-}" ]]; then
-    echo "WARNING: BASETEN_API_KEY is not set. Skipping opencode Baseten provider."
-    echo "         To enable: cp .env.example .env and fill in your key, or export BASETEN_API_KEY."
-    return 0
-  fi
-
-  mkdir -p ~/.config/opencode
-  BASETEN_API_KEY="$BASETEN_API_KEY" python3 - << 'PYEOF'
-import json, os
-
-path = os.path.expanduser("~/.config/opencode/opencode.json")
-try:
-    with open(path) as f:
-        cfg = json.load(f)
-except (FileNotFoundError, json.JSONDecodeError):
-    cfg = {}
-
-cfg.setdefault("$schema", "https://opencode.ai/config.json")
-
-api_key = os.environ["BASETEN_API_KEY"]
-BASE_URL = "https://inference.baseten.co/v1"
-
-# Default the main session model to the chain head, and offload housekeeping
-# (titles, etc.) to the cheap Flash variant instead of burning GLM-5.3.
-cfg["model"] = "baseten/zai-org/GLM-5.3"
-cfg["small_model"] = "baseten/zai-org/GLM-5.3-Flash"
-
-cfg["provider"] = {
-    "baseten": {
-        "npm": "@ai-sdk/openai-compatible",
-        "name": "Baseten",
-        "options": {
-            "baseURL": BASE_URL,
-            "apiKey": api_key,
-        },
-        "models": {
-            "deepseek-ai/DeepSeek-V4-Pro-0813": {"name": "DeepSeek V4 Pro", "limit": {"context": 200000, "output": 262144}},
-            "deepseek-ai/DeepSeek-V4-Flash-0731": {"name": "DeepSeek V4 Flash", "limit": {"context": 200000, "output": 262144}},
-            "nvidia/NVIDIA-Nemotron-3-Ultra-550B-A55B": {"name": "Nemotron Ultra", "limit": {"context": 200000, "output": 202800}},
-            "zai-org/GLM-5.3": {"name": "GLM 5.3", "limit": {"context": 200000, "output": 262144}},
-            "zai-org/GLM-5.3-Flash": {"name": "GLM 5.3 Flash", "limit": {"context": 200000, "output": 262144}},
-            "zai-org/GLM-5.2": {"name": "GLM 5.2", "limit": {"context": 200000, "output": 262144}},
-            "zai-org/GLM-5.2-Fast": {"name": "GLM 5.2 Fast", "limit": {"context": 200000, "output": 262144}},
-        },
-    },
-    # OpenRouter (free-tier last resort). Dormant until OPENROUTER_API_KEY is
-    # exported: opencode resolves {env:...} lazily, so the models are listed but
-    # auth fails until the key exists.
-    "openrouter": {
-        "npm": "@ai-sdk/openrouter",
-        "name": "OpenRouter",
-        "options": {"apiKey": "{env:OPENROUTER_API_KEY}"},
-        "models": {
-            "deepseek/deepseek-chat:free": {"name": "DeepSeek Chat (free)"},
-            "google/gemini-2.5-flash:free": {"name": "Gemini 2.5 Flash (free)"},
-            "meta-llama/llama-3.3-70b-instruct:free": {"name": "Llama 3.3 70B (free)"},
-            "qwen/qwen3-32b:free": {"name": "Qwen3 32B (free)"},
-        },
-    },
-}
-
-with open(path, "w") as f:
-    json.dump(cfg, f, indent=2)
-    f.write("\n")
-PYEOF
-  echo "  opencode baseten provider configured (inference.baseten.co/v1)"
-}
-
-# Ensure ~/.config/opencode/opencode.json allows every action on every
-# resource (v2 permissions rule array), and autoupdate: true so opencode
-# itself always tracks the latest version.
-#
-# v2 permissions are an ORDERED array of {action, resource, effect} rules;
-# no matching rule => ask. The old v1-style `permission` shorthand key is
-# IGNORED by the v2 runtime (docs: use `permissions`, not `permission`),
-# so it is removed. Rules: last matching wins; global rules are appended
-# after built-in defaults, and agent-specific rules are appended after
-# global ones — so shipped agents (build/plan/general/explore, which ask
-# for external directories) also get per-agent allow-all rules to fully
-# suppress prompts.
-configure_opencode_permission() {
-  mkdir -p ~/.config/opencode
-  python3 - << 'PYEOF'
-import json, os
-
-path = os.path.expanduser("~/.config/opencode/opencode.json")
-try:
-    with open(path, "r") as f:
-        config = json.load(f)
-except (FileNotFoundError, json.JSONDecodeError):
-    config = {}
-
-config.setdefault("$schema", "https://opencode.ai/config.json")
-config.pop("permission", None)  # v1-only key; the v2 runtime ignores it
-allow_all = [{"action": "*", "resource": "*", "effect": "allow"}]
-config["permissions"] = allow_all
-config["autoupdate"] = True
-
-# Shipped agents carry their own policies (e.g. ask on external_directory)
-# that would override the global rule; append per-agent allow-all too.
-config.setdefault("agents", {})
-for agent_id in ("build", "plan", "general", "explore"):
-    config["agents"].setdefault(agent_id, {})["permissions"] = allow_all
-
-with open(path, "w") as f:
-    json.dump(config, f, indent=2)
-    f.write("\n")
-PYEOF
-}
 
 # Ensure runlayer MCP (https://baseten.runlayer.com/mcp) is configured in
-# all three harnesses: opencode, droid, and cursor-cli. Idempotent.
+# the three harnesses: omp, droid, and cursor-cli. Idempotent.
 configure_runlayer_mcp() {
   local url="https://baseten.runlayer.com/mcp"
-  # opencode -> ~/.config/opencode/opencode.json (v1: mcp.<name> at top level)
-  mkdir -p ~/.config/opencode
+  # omp -> ~/.omp/agent/mcp.json (mcpServers.<name> with type http)
+  mkdir -p ~/.omp/agent
   python3 - << 'PYEOF'
 import json, os
-path = os.path.expanduser("~/.config/opencode/opencode.json")
+path = os.path.expanduser("~/.omp/agent/mcp.json")
 try:
     with open(path) as f:
-        cfg = json.load(f)
+        data = json.load(f)
 except (FileNotFoundError, json.JSONDecodeError):
-    cfg = {}
-cfg.setdefault("$schema", "https://opencode.ai/config.json")
-cfg.setdefault("mcp", {})
-cfg["mcp"]["runlayer"] = {"type": "remote", "url": "https://baseten.runlayer.com/mcp"}
+    data = {}
+data.setdefault("mcpServers", {})
+data["mcpServers"]["runlayer"] = {"type": "http", "url": "https://baseten.runlayer.com/mcp"}
 with open(path, "w") as f:
-    json.dump(cfg, f, indent=2)
+    json.dump(data, f, indent=2)
     f.write("\n")
 PYEOF
-  echo "  opencode runlayer MCP configured"
-
+  echo "  omp runlayer MCP configured"
   # droid / Factory -> ~/.factory/mcp.json (mcpServers.<name> with type http)
   mkdir -p ~/.factory
   python3 - << 'PYEOF'
@@ -267,15 +68,15 @@ PYEOF
   echo "  cursor runlayer MCP configured"
 }
 
-# Symlink the repo's global opencode instructions into
-# ~/.config/opencode/AGENTS.md so every project session picks up the same
-# global rules (no /tmp, lowercase names, worktrees above the repo, Docker
-# host networking). Idempotent: re-runs refresh the symlink.
+# Symlink the repo's global omp instructions into ~/.omp/agent/AGENTS.md so
+# every project session picks up the same global rules (no /tmp, lowercase
+# names, worktrees above the repo, Docker host networking). Idempotent:
+# re-runs refresh the symlink.
 # Pass the repo root as $1.
 install_global_agents_md() {
   local repo_dir="$1"
-  local src="$repo_dir/config/opencode/AGENTS.md"
-  local dest="$HOME/.config/opencode/AGENTS.md"
+  local src="$repo_dir/config/omp/AGENTS.md"
+  local dest="$HOME/.omp/agent/AGENTS.md"
 
   if [[ ! -f "$src" ]]; then
     echo "NOTE: no global AGENTS.md at $src; skipping."
@@ -286,11 +87,12 @@ install_global_agents_md() {
   if [[ -e "$dest" && ! -L "$dest" ]]; then
     # Preserve any hand-edited copy before taking over with the managed symlink.
     mv -f "$dest" "$dest.bak"
-    echo "  backed up existing ~/.config/opencode/AGENTS.md -> AGENTS.md.bak"
+    echo "  backed up existing ~/.omp/agent/AGENTS.md -> AGENTS.md.bak"
   fi
   ln -sfn "$src" "$dest"
-  echo "Global opencode AGENTS.md installed: $dest -> $src"
+  echo "Global omp AGENTS.md installed: $dest -> $src"
 }
+
 
 # Configure Factory custom models (Baseten BYOK).
 #
@@ -601,14 +403,14 @@ PYEOF
 }
 
 # Symlink every skill under <repo>/skills/<name>/SKILL.md into each harness's
-# global skills directory so droid, opencode, and cursor-cli all see the same
+# global skills directory so droid, omp, and cursor-cli all see the same
 # personal skill set. Grok Build is included only when $2 is "true" (default),
 # so brew-setup.sh installs grok skills while setup.sh skips them.
 # Idempotent: re-runs refresh the symlinks.
 #
 # Targets (primary path per harness; avoids multi-scan duplicates):
 #   Factory / droid  -> ~/.factory/skills/
-#   OpenCode         -> ~/.config/opencode/skills/
+#   omp              -> ~/.omp/agent/skills/
 #   Cursor CLI       -> ~/.cursor/skills/
 #   xAI / Grok Build -> ~/.grok/skills/   (optional, see $2)
 #
@@ -630,7 +432,7 @@ install_shared_skills() {
 
   local targets=(
     "$HOME/.factory/skills"
-    "$HOME/.config/opencode/skills"
+    "$HOME/.omp/agent/skills"
     "$HOME/.cursor/skills"
   )
   if [[ "$include_grok" == "true" ]]; then
@@ -642,7 +444,7 @@ install_shared_skills() {
     mkdir -p "$target"
   done
 
-  local harness_names="factory, opencode, cursor"
+  local harness_names="factory, omp, cursor"
   [[ "$include_grok" == "true" ]] && harness_names+=", grok"
 
   echo "Installing shared skills from $skills_src ..."
@@ -727,7 +529,7 @@ PYEOF
   # greedily consumes every non-flag arg after -a as an agent name.
     npx --yes skills@latest remove -g -y \
       "${names[@]}" \
-      -a universal -a droid -a opencode -a cursor \
+      -a universal -a droid -a cursor \
       || echo "WARNING: skill removal reported errors (continuing)."
 }
 
@@ -783,10 +585,10 @@ install_skill_packages() {
     packs+=("emilkowalski/skills")
   fi
   # Harnesses we install in bootstrap + common neighbors. Skip eve / promptscript.
+  # omp is covered by `universal` (~/.agents/skills), which it reads natively.
   local agents=(
     universal
     droid
-    opencode
     cursor
   )
   local agent_args=()
@@ -812,7 +614,7 @@ install_skill_packages() {
 # ~/.agents/skills/. These dirs are created by a previous
 # `npx skills add --agent '*'` run (now replaced by an explicit agents list)
 # and only contain skill symlinks — no real config or data. Real agent dirs
-# (.cursor, .grok, .factory, .opencode) have config files and are
+# (.cursor, .grok, .factory, .omp) have config files and are
 # never touched. Idempotent.
 cleanup_stale_skill_dirs() {
   python3 - << 'PYEOF'
@@ -861,7 +663,7 @@ cleanup_stale_baseten_skill() {
   local locations=(
     "$HOME/.agents/skills/baseten"
     "$HOME/.factory/skills/baseten"
-    "$HOME/.config/opencode/skills/baseten"
+    "$HOME/.omp/agent/skills/baseten"
     "$HOME/.cursor/skills/baseten"
     "$HOME/.grok/skills/baseten"
   )
@@ -1029,94 +831,6 @@ ensure_croc() {
   rm -rf "$tmp"
 }
 
-# ============================================================================
-# 2026-09 stack: opencode v2 (opencode2, @opencode-ai/cli beta channel) +
-# oh-my-opencode-slim (agent orchestration plugin).
-# ============================================================================
-
-# Install/update opencode v2 (@opencode-ai/cli, bin `opencode2`) from the
-# beta dist-tag — that is where v2 ships (the v1 line stays opencode-ai@latest).
-# Installs into EVERY nvm node version dir + the current npm prefix so no
-# stale copy shadows PATH.
-install_opencode_v2() {
-  echo "Installing opencode v2 (@opencode-ai/cli, beta channel)..."
-  local node_dir bin_dir installed=0 current_bin="" skip_current=0
-  if command -v npm >/dev/null 2>&1; then
-    current_bin="$(dirname "$(command -v npm)")"
-  fi
-  _install_v2_into() {
-    local bin_dir="$1"
-    local attempt
-    for attempt in 1 2 3; do
-      if PATH="$bin_dir:$PATH" npm install -g @opencode-ai/cli@beta >/dev/null 2>&1 && \
-         PATH="$bin_dir:$PATH" opencode2 --version >/dev/null 2>&1; then
-        echo "  opencode2 ready: $bin_dir"
-        return 0
-      fi
-      echo "Warning: opencode2 not runnable in $bin_dir (attempt $attempt/3); retrying..." >&2
-      sleep 2
-    done
-    return 1
-  }
-  while IFS= read -r node_dir; do
-    [[ -n "$node_dir" ]] || continue
-    bin_dir="$node_dir/bin"
-    [[ -n "$current_bin" && "$bin_dir" == "$current_bin" ]] && skip_current=1
-    if _install_v2_into "$bin_dir"; then
-      installed=$((installed + 1))
-    fi
-  done < <(_nvm_node_version_dirs)
-  if [[ "$skip_current" -eq 0 && -n "$current_bin" ]]; then
-    if _install_v2_into "$current_bin"; then
-      installed=$((installed + 1))
-    fi
-  fi
-  if [[ "$installed" -eq 0 ]]; then
-    echo "WARNING: opencode v2 could not be installed (continuing)" >&2
-    return 0
-  fi
-  # Alias `opencode` -> the v2 binary: slim's installer and other tooling look
-  # for the `opencode` name; v2 is the current line so it wins the name.
-  v2_bin="$(command -v opencode2 || true)"
-  if [[ -n "$v2_bin" ]] && { [[ ! -e "$(dirname "$v2_bin")/opencode" ]] || [[ -L "$(dirname "$v2_bin")/opencode" ]]; }; then
-    ln -sfn "$v2_bin" "$(dirname "$v2_bin")/opencode"
-    echo "  aliased opencode -> opencode2"
-  fi
-  return 0
-}
-
-# Install oh-my-opencode-slim (agent orchestration plugin), tracking the
-# latest published version (unpinned — v2 auto-refreshes unpinned plugins on
-# startup, which is what we want here).
-# Uses bunx when bun exists, else npx (the published CLI is a Node bundle).
-install_omod_slim() {
-  echo "Installing oh-my-opencode-slim@latest..."
-  if command -v bun >/dev/null 2>&1; then
-    bunx "oh-my-opencode-slim@latest" install --companion=no <<< "N" || \
-      echo "WARNING: slim installer reported errors (continuing)." >&2
-  else
-    npx --yes "oh-my-opencode-slim@latest" install --companion=no <<< "N" || \
-      echo "WARNING: slim installer reported errors (continuing)." >&2
-  fi
-  # Register the plugin unpinned in the opencode config (tracks latest).
-  python3 - << 'PYEOF'
-import json, os
-path = os.path.expanduser("~/.config/opencode/opencode.json")
-try:
-    with open(path) as f:
-        cfg = json.load(f)
-except (FileNotFoundError, json.JSONDecodeError):
-    cfg = {}
-plugins = [p for p in cfg.get("plugin", []) if not str(p).startswith("oh-my-opencode-slim")]
-plugins.append("oh-my-opencode-slim")
-cfg["plugin"] = plugins
-with open(path, "w") as f:
-    json.dump(cfg, f, indent=2)
-    f.write("\n")
-print("  slim registered (unpinned, tracks latest)")
-PYEOF
-  echo "  oh-my-opencode-slim installed."
-}
 
 
 # Persist ~/.local/bin onto PATH in shell rc files (managed block), using
@@ -1128,80 +842,252 @@ persist_local_bin() {
     'export PATH="$HOME/.local/bin:$PATH"'
 }
 
-# Persist the env flags oh-my-opencode-slim needs for background orchestration
-# and the built-in Exa websearch tool (managed blocks in shell rc files), so a
-# plain `opencode` launch in any new shell has them applied. The slim
-# installer prints these as "next steps"; we set them once, idempotently.
-persist_opencode_env() {
-  persist_export_to_rc "OPENCODE_EXPERIMENTAL_BACKGROUND_SUBAGENTS" "true"
-  persist_export_to_rc "OPENCODE_ENABLE_EXA" "1"
-  persist_export_to_rc "OPENCODE_ENABLE_PARALLEL" "true"
-  echo "  opencode env flags persisted (background subagents, Exa websearch)"
+
+
+
+# Install oh-my-pi (omp), the Rust-core coding agent (the harness of record
+# since Sept 2026; opencode + oh-my-opencode-slim were removed after the
+# side-by-side trial). Vanilla setup: built-in agents/roles, no plugins.
+install_omp() {
+  echo "Installing oh-my-pi (omp)..."
+  if command -v bun >/dev/null 2>&1; then
+    bun install -g @oh-my-pi/pi-coding-agent \
+      || echo "WARNING: omp install failed (continuing)." >&2
+  else
+    npm install -g @oh-my-pi/pi-coding-agent \
+      || echo "WARNING: omp install failed (continuing)." >&2
+  fi
 }
 
+# Configure omp (vanilla — no custom agents; omp's built-in task tool and the
+# model roles are the whole setup):
+#   ~/.omp/agent/models.yml    Baseten provider + OpenRouter free-floor provider
+#   ~/.omp/agent/config.yml    model roles + the session-wide fallback chain
+# Idempotent: every file is regenerated on each run. Keys are embedded at
+# setup time (repo is private) and models.yml is chmod 600. The global
+# AGENTS.md symlink is owned by install_global_agents_md, not this function.
+configure_omp() {
+  if [[ -z "${BASETEN_API_KEY:-}" ]]; then
+    echo "WARNING: BASETEN_API_KEY is not set. Skipping omp config."
+    echo "         To enable: cp .env.example .env and fill in your key."
+    return 0
+  fi
+  mkdir -p ~/.omp/agent
 
-# Write oh-my-opencode-slim per-agent model fallback chains into the opencode
-# config. One preset ("default"): each agent gets an intelligence-ordered
-# chain — GLM-5.3-Flash first, then GLM-5.3 (heavy reasoning agents only),
-# then progressively cheaper Baseten models, ending on free
-# opencode/OpenRouter models. The slim plugin's
-# ForegroundFallbackManager walks the chain on rate limits / failures.
-# Every agent also gets permission "allow" — no tool-level restrictions,
-# on top of the global permission: "allow" in opencode.json.
-configure_omod_slim_presets() {
-  mkdir -p ~/.config/opencode
-  python3 - "$HOME" << 'PYEOF'
-import json, os
+  # --- models.yml: Baseten provider + optional OpenRouter free floor ---------
+  # GLM-5.3(-Flash)/DeepSeek-V4-Pro take reasoning_effort (high); Nemotron and
+  # GLM-5.2(-Fast) need chat_template_args.enable_thinking (Baseten reasoning
+  # docs); DeepSeek-V4-Flash-0731 is a plain non-reasoning model. compat blocks
+  # replace rather than merge in omp, so each model spells out its full set.
+  cat > ~/.omp/agent/models.yml <<EOF
+# Managed by dotfiles setup (configure_omp in lib/shared.sh) — hand edits are
+# overwritten on the next setup run.
+providers:
+  baseten:
+    baseUrl: https://inference.baseten.co/v1
+    api: openai-completions
+    apiKey: "${BASETEN_API_KEY}"
+    authHeader: true
+    models:
+      - id: zai-org/GLM-5.3
+        name: GLM 5.3
+        reasoning: true
+        input: [text]
+        contextWindow: 200000
+        maxTokens: 262144
+        thinking: { mode: effort, minLevel: high, maxLevel: max }
+        compat:
+          supportsDeveloperRole: false
+          supportsReasoningEffort: true
+          maxTokensField: max_tokens
+      - id: zai-org/GLM-5.3-Flash
+        name: GLM 5.3 Flash
+        reasoning: true
+        input: [text]
+        contextWindow: 200000
+        maxTokens: 262144
+        thinking: { mode: effort, minLevel: high, maxLevel: max }
+        compat:
+          supportsDeveloperRole: false
+          supportsReasoningEffort: true
+          maxTokensField: max_tokens
+      - id: deepseek-ai/DeepSeek-V4-Pro-0813
+        name: DeepSeek V4 Pro
+        reasoning: true
+        input: [text]
+        contextWindow: 200000
+        maxTokens: 262144
+        thinking: { mode: effort, minLevel: high, maxLevel: max }
+        compat:
+          supportsDeveloperRole: false
+          supportsReasoningEffort: true
+          maxTokensField: max_tokens
+          reasoningEffortMap: { high: high, xhigh: max }
+      - id: deepseek-ai/DeepSeek-V4-Flash-0731
+        name: DeepSeek V4 Flash
+        reasoning: false
+        input: [text]
+        contextWindow: 200000
+        maxTokens: 1048576
+        compat:
+          supportsDeveloperRole: false
+          supportsReasoningEffort: false
+          maxTokensField: max_tokens
+      - id: nvidia/NVIDIA-Nemotron-3-Ultra-550B-A55B
+        name: Nemotron 3 Ultra
+        reasoning: true
+        input: [text]
+        contextWindow: 200000
+        maxTokens: 202800
+        compat:
+          supportsDeveloperRole: false
+          supportsReasoningEffort: false
+          maxTokensField: max_tokens
+          extraBody:
+            chat_template_args:
+              enable_thinking: true
+      - id: zai-org/GLM-5.2
+        name: GLM 5.2
+        reasoning: true
+        input: [text]
+        contextWindow: 200000
+        maxTokens: 262144
+        compat:
+          supportsDeveloperRole: false
+          supportsReasoningEffort: false
+          maxTokensField: max_tokens
+          extraBody:
+            chat_template_args:
+              enable_thinking: true
+      - id: zai-org/GLM-5.2-Fast
+        name: GLM 5.2 Fast
+        reasoning: true
+        input: [text]
+        contextWindow: 200000
+        maxTokens: 262144
+        compat:
+          supportsDeveloperRole: false
+          supportsReasoningEffort: false
+          maxTokensField: max_tokens
+          extraBody:
+            chat_template_args:
+              enable_thinking: true
+EOF
 
-home = os.environ["HOME"]
-path = os.path.join(home, ".config/opencode/opencode.json")
-try:
-    with open(path) as f:
-        cfg = json.load(f)
-except (FileNotFoundError, json.JSONDecodeError):
-    cfg = {}
+  # Free-floor provider: named "openrouter-free" so it never collides with
+  # omp's built-in openrouter provider, with ids that avoid the ":free" suffix
+  # (omp selectors parse a colon as a thinking-level suffix). Defined for
+  # manual --model use only — NOT part of the fallback chain, which stays
+  # vanilla (the 7 Baseten models). Present only when OPENROUTER_API_KEY is set.
+  if [[ -n "${OPENROUTER_API_KEY:-}" ]]; then
+    cat >> ~/.omp/agent/models.yml <<EOF
+  openrouter-free:
+    baseUrl: https://openrouter.ai/api/v1
+    api: openai-completions
+    apiKey: "${OPENROUTER_API_KEY}"
+    authHeader: true
+    models:
+      - id: nemotron-3-ultra-550b-a55b-free
+        name: Nemotron 3 Ultra (free)
+        reasoning: false
+        input: [text]
+        contextWindow: 131072
+        maxTokens: 16384
+        compat:
+          supportsDeveloperRole: false
+          supportsReasoningEffort: false
+          maxTokensField: max_tokens
+      - id: deepseek-chat-free
+        name: DeepSeek Chat (free)
+        reasoning: false
+        input: [text]
+        contextWindow: 65536
+        maxTokens: 8192
+        compat:
+          supportsDeveloperRole: false
+          supportsReasoningEffort: false
+          maxTokensField: max_tokens
+      - id: gemini-2.5-flash-free
+        name: Gemini 2.5 Flash (free)
+        reasoning: false
+        input: [text]
+        contextWindow: 1048576
+        maxTokens: 8192
+        compat:
+          supportsDeveloperRole: false
+          supportsReasoningEffort: false
+          maxTokensField: max_tokens
+      - id: llama-3.3-70b-instruct-free
+        name: Llama 3.3 70B (free)
+        reasoning: false
+        input: [text]
+        contextWindow: 131072
+        maxTokens: 8192
+        compat:
+          supportsDeveloperRole: false
+          supportsReasoningEffort: false
+          maxTokensField: max_tokens
+      - id: qwen3-32b-free
+        name: Qwen3 32B (free)
+        reasoning: false
+        input: [text]
+        contextWindow: 131072
+        maxTokens: 8192
+        compat:
+          supportsDeveloperRole: false
+          supportsReasoningEffort: false
+          maxTokensField: max_tokens
+EOF
+  else
+    echo "NOTE: OPENROUTER_API_KEY is not set. omp free-floor provider skipped (fallback chain unaffected)."
+  fi
+  chmod 600 ~/.omp/agent/models.yml
 
-glm53 = "baseten/zai-org/GLM-5.3"
-glm53f = "baseten/zai-org/GLM-5.3-Flash"
-ds_pro = "baseten/deepseek-ai/DeepSeek-V4-Pro-0813"
-ds_flash = "baseten/deepseek-ai/DeepSeek-V4-Flash-0731"
-baseten_tail = [
-    "baseten/nvidia/NVIDIA-Nemotron-3-Ultra-550B-A55B",
-    "baseten/zai-org/GLM-5.2",
-    "baseten/zai-org/GLM-5.2-Fast",
-]
-free_floor = [
-    "opencode/nvidia/nemotron-3-ultra-550b-a55b:free",
-    "openrouter/deepseek/deepseek-chat:free",
-    "openrouter/google/gemini-2.5-flash:free",
-    "openrouter/meta-llama/llama-3.3-70b-instruct:free",
-    "openrouter/qwen/qwen3-32b:free",
-]
-heavy = [glm53f, glm53, ds_pro, ds_flash] + baseten_tail + free_floor
-light = [glm53f, ds_pro, ds_flash] + baseten_tail + free_floor
+  # --- config.yml: model roles + session-wide fallback chain ----------------
+  # Roles: Flash primary everywhere, GLM-5.3 for the heavyweight seats
+  # (slow / plan), advisor kept cheap. "advisor" only
+  # matters if the turn-reviewer feature is enabled; it maps to Flash so an
+  # accidental enable can't burn GLM-5.3 on every turn. All Baseten models are
+  # text-only, so the vision role is left unset on purpose.
+  cat > ~/.omp/agent/config.yml <<EOF
+# Managed by dotfiles setup (configure_omp in lib/shared.sh) — hand edits are
+# overwritten on the next setup run.
+modelRoles:
+  default: baseten/zai-org/GLM-5.3-Flash
+  smol: baseten/zai-org/GLM-5.3-Flash
+  slow: baseten/zai-org/GLM-5.3
+  task: baseten/zai-org/GLM-5.3-Flash
+  tiny: baseten/zai-org/GLM-5.3-Flash
+  commit: baseten/zai-org/GLM-5.3-Flash
+  plan: baseten/zai-org/GLM-5.3
+  advisor: baseten/zai-org/GLM-5.3-Flash
 
-# One preset; per-agent chains. Format: presets.default.<agent> = {model: [chain]}
-# Truly YOLO: permission "allow" lifts the plugin's per-agent tool
-# restrictions (e.g. explorer read-only), and skills/mcps ["*"] gives every
-# agent all skills and all MCP servers — no gating of any kind.
-allow = {"permission": "allow", "skills": ["*"], "mcps": ["*"]}
-cfg["presets"] = {
-    "default": {
-        "orchestrator": {"model": heavy, **allow},
-        "oracle":        {"model": heavy, **allow},
-        "council":       {"model": heavy, **allow},
-        "librarian":     {"model": light, **allow},
-        "designer":      {"model": heavy, **allow},
-        "fixer":         {"model": light, **allow},
-        "explorer":      {"model": light, **allow},
-    },
-}
+retry:
+  enabled: true
+  modelFallback: true
+  fallbackRevertPolicy: cooldown-expiry
+  maxRetries: 10
+  fallbackChains:
+    # The 7-model Baseten fallback chain (Flash head, then progressively
+    # heavier/cheaper models). Every role — including subagents spawned
+    # by the built-in task tool on the "task" role — inherits this chain.
+    default:
+      - baseten/zai-org/GLM-5.3-Flash
+      - baseten/zai-org/GLM-5.3
+      - baseten/deepseek-ai/DeepSeek-V4-Pro-0813
+      - baseten/deepseek-ai/DeepSeek-V4-Flash-0731
+      - baseten/nvidia/NVIDIA-Nemotron-3-Ultra-550B-A55B
+      - baseten/zai-org/GLM-5.2
+      - baseten/zai-org/GLM-5.2-Fast
+EOF
 
-with open(path, "w") as f:
-    json.dump(cfg, f, indent=2)
-    f.write("\n")
-print("  per-agent fallback chains configured (single 'default' preset)")
-PYEOF
-  echo "  oh-my-opencode-slim presets written."
-  persist_opencode_env
+  # Vanilla: no custom agents under ~/.omp/agent/agents — omp's built-in
+  # task tool spawns subagents on the "task" role, which inherits the
+  # default chain above. Remove specialist agents from earlier setup
+  # runs so the config stays clean.
+  rm -f ~/.omp/agent/agents/{explorer,librarian,fixer,designer,oracle}.md
+  rmdir ~/.omp/agent/agents 2>/dev/null || true
+
+  echo "  omp configured (models.yml, config.yml — vanilla, no custom agents)."
+  echo "  Global AGENTS.md symlink + skills + runlayer MCP are owned by other functions."
 }

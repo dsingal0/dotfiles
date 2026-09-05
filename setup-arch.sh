@@ -14,8 +14,9 @@ append_once() {
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
-# Source shared config helpers (opencode permission + Baseten BYOK models),
-# deduplicated with setup.sh / brew-setup.sh so all bootstrap scripts stay in sync.
+# Source shared config helpers (omp install/config, Baseten BYOK models,
+# skills, MCP), deduplicated with setup.sh / brew-setup.sh so all bootstrap
+# scripts stay in sync.
 . "$SCRIPT_DIR/lib/shared.sh"
 
 # Use sudo only if available and we're not already root; otherwise call pacman
@@ -89,17 +90,17 @@ nvm use node
 # Verify the Node.js version:
 node -v # Should print the latest Node.js release.
 
-# 2026-09 stack: opencode v2 (@opencode-ai/cli, bin opencode2) from the beta
-# channel + oh-my-opencode-slim (agent orchestration plugin). jcode/carry are
-# manual installs now; they are not part of bootstrap.
+# 2026-09 stack: omp (oh-my-pi, @oh-my-pi/pi-coding-agent) is the coding
+# harness. jcode/carry are manual installs; not part of bootstrap.
 load_env_file "$SCRIPT_DIR"
 
-uninstall_opencode_all_node_versions
-uninstall_opencode_and_omo
-install_opencode_v2
-install_omod_slim
-configure_opencode_permission
-configure_omod_slim_presets
+install_omp
+configure_omp
+
+# Install the repo's global omp instructions (~/.omp/agent/AGENTS.md) so
+# every project session follows the same global rules.
+install_global_agents_md "$SCRIPT_DIR"
+
 
 # Install/update Meta CLI.
 curl -fsSL https://dev.meta.ai/install.sh | bash
@@ -170,11 +171,11 @@ fi
 rtk --version
 
 # Initialize rtk hooks for the agents I use that rtk supports natively.
-# OpenCode (plugin) and Cursor (preToolUse hook in ~/.cursor/hooks.json).
+# omp (Pi coding agent) and Cursor (preToolUse hook in ~/.cursor/hooks.json).
 # Cursor uses --hook-only --no-patch so it skips the Claude Code RTK.md /
 # CLAUDE.md / settings.json artifacts (I don't use Claude Code).
 # Note: rtk has no native Droid/Factory integration; Droid is not wired here.
-RTK_TELEMETRY_DISABLED=1 rtk init -g --opencode
+RTK_TELEMETRY_DISABLED=1 rtk init -g --agent pi
 # Cursor desktop isn't installed on Linux dev pods, so ~/.cursor may not exist;
 # rtk writes a temp file there during init and errors out without the dir.
 mkdir -p "$HOME/.cursor"
@@ -200,7 +201,7 @@ configure_cursor
 # its place by install_shared_skills below.
 cleanup_stale_baseten_skill
 
-# Install personal skills into every harness (droid / opencode / cursor).
+# Install personal skills into every harness (droid / omp / cursor).
 # Design skills (frontend-design) are skipped here and installed only by
 # brew-setup.sh (macOS).
 install_shared_skills "$SCRIPT_DIR" false "frontend-design"
