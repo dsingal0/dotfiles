@@ -40,8 +40,10 @@ $SUDO pacman -Syu --noconfirm || true
 # btop, tree, bison, tmux keep their names. git is added (required to clone AUR
 # packages below); croc and uv are official-repo packages here, so they replace
 # the GitHub-release / curl installers used by setup.sh.
+# unzip is required by the bun installer (omp's binary needs bun; see
+# install_omp in lib/shared.sh).
 $SUDO pacman -S --needed --noconfirm \
-  base-devel git btop clang tree libevent ncurses bison tmux github-cli croc uv || true
+  base-devel git btop unzip clang tree libevent ncurses bison tmux github-cli croc uv || true
 
 # Install paru (AUR helper) from the AUR if not already present. paru is used
 # for AUR-only packages below (rtk-bin). Building requires base-devel + git
@@ -108,7 +110,10 @@ curl -fsSL https://dev.meta.ai/install.sh | bash
 configure_runlayer_mcp
 
 # Install droid (Factory CLI) - npm always runs postinstall scripts, so the
-# npm-managed install is the reliable one.
+# npm-managed install is the reliable one. Uninstall the stale npm-managed
+# droid copy (and paseo, dropped from the bootstrap) so nothing shadows the
+# fresh droid install below.
+npm uninstall -g droid @getpaseo/cli 2>/dev/null || true
 rm -f "$HOME/.local/bin/droid" 2>/dev/null || true
 echo "Installing droid..."
 npm install -g droid
@@ -147,13 +152,6 @@ fi
 # Install/update Cursor CLI
 echo "Installing Cursor CLI..."
 curl https://cursor.com/install -fsS | bash
-
-# Install/update paseo (pre-release track via the `beta` dist-tag)
-echo "Installing paseo..."
-npm install -g @getpaseo/cli@beta
-# Bare `paseo` runs onboard and prompts for relay pairing + voice on a TTY.
-# --no-relay skips device pairing; --voice disable skips voice model downloads.
-paseo onboard --no-relay --voice disable
 
 # Install/update rtk (Rust Token Killer) - CLI proxy that cuts LLM token usage.
 # Installed from the AUR (rtk-bin = prebuilt binary) via paru; falls back to the

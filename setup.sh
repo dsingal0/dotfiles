@@ -27,7 +27,9 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # MCP), deduplicated with brew-setup.sh so both bootstrap scripts stay in sync.
 . "$SCRIPT_DIR/lib/shared.sh"
 
-$ADO install -y btop libclang-dev tree libevent-dev libncurses-dev build-essential bison || true
+# unzip is required by the bun installer (omp's binary needs bun; see
+# install_omp in lib/shared.sh).
+$ADO install -y btop unzip libclang-dev tree libevent-dev libncurses-dev build-essential bison || true
 
 # Install/update tmux from apt.
 # Previously this built tmux from source with --prefix=/usr/local, which

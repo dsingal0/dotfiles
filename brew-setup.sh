@@ -16,10 +16,12 @@ brew tap basetenlabs/baseten
 brew trust basetenlabs/baseten 2>/dev/null || true
 
 # Packages to install and keep up to date
-# `node` provides npm, used below to install paseo.
+# `node` provides npm, used below to install droid.
 # `baseten` = basetenlabs/baseten-cli (https://github.com/basetenlabs/baseten-cli); `uv` for ~/venv + truss.
-FORMULAS=(baseten btop croc gh node mole rtk tmux uv)
+# `bun` is required by the omp binary (see install_omp in lib/shared.sh).
+FORMULAS=(baseten btop bun croc gh node mole rtk tmux uv)
 # ghostty = terminal emulator. grok-build has no official curl installer, so it
+# is installed as a cask below.
 # font-jetbrains-mono-nerd-font = JetBrains Mono with Nerd Font glyphs for TUIs.
 CASKS=(brave-browser@beta ghostty font-jetbrains-mono-nerd-font)
 CASKS+=(grok-build)
@@ -36,7 +38,8 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 . "$SCRIPT_DIR/lib/shared.sh"
 
 # Uninstall the npm-managed copies of packages so no stale npm binaries linger
-# on PATH. Drop droid/paseo here so they don't shadow the fresh npm installs below.
+# on PATH. Drop droid/paseo here: droid so it doesn't shadow the fresh npm
+# install below, and paseo because it's no longer part of the bootstrap.
 npm uninstall -g droid @getpaseo/cli 2>/dev/null || true
 
 # 2026-09 stack: omp (oh-my-pi, @oh-my-pi/pi-coding-agent) is the coding

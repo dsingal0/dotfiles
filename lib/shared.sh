@@ -850,6 +850,17 @@ persist_local_bin() {
 # side-by-side trial). Vanilla setup: built-in agents/roles, no plugins.
 install_omp() {
   echo "Installing oh-my-pi (omp)..."
+  # The omp package ships a bun-compiled binary (#!/usr/bin/env bun), so bun
+  # is required even when the npm fallback install path below is used. The
+  # bun.sh installer needs unzip (setup.sh/setup-arch.sh apt/pacman-install
+  # it; macOS ships /usr/bin/unzip; brew-setup.sh installs the bun formula).
+  if ! command -v bun >/dev/null 2>&1; then
+    echo "  bun not found (required by the omp binary); installing via bun.sh..."
+    curl -fsSL https://bun.sh/install | bash >/dev/null 2>&1 \
+      || echo "WARNING: bun install failed; will try the npm fallback for omp." >&2
+    export BUN_INSTALL="${BUN_INSTALL:-$HOME/.bun}"
+    export PATH="$BUN_INSTALL/bin:$PATH"
+  fi
   if command -v bun >/dev/null 2>&1; then
     bun install -g @oh-my-pi/pi-coding-agent \
       || echo "WARNING: omp install failed (continuing)." >&2
