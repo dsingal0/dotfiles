@@ -40,8 +40,11 @@ echo "Installing tmux..."
 $ADO install -y tmux
 tmux -V
 
-# Symlink tmux config (enables mouse scroll passthrough for Droid in tmux)
-ln -sf "$SCRIPT_DIR/tmux.conf" "$HOME/.tmux.conf"
+# Login shells (tmux panes run `-bash`) read ~/.profile, not ~/.bashrc, where
+# installers (bun.sh, nvm) append PATH setup. Bridge the two so new panes pick
+# up tool PATHs without restarting the tmux server.
+link_profile_to_bashrc
+
 # Reload config into running tmux server, if any
 tmux source-file "$HOME/.tmux.conf" 2>/dev/null || true
 

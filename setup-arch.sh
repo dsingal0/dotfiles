@@ -67,6 +67,7 @@ tmux -V
 
 # Symlink tmux config (enables mouse scroll passthrough for Droid in tmux)
 ln -sf "$SCRIPT_DIR/tmux.conf" "$HOME/.tmux.conf"
+link_profile_to_bashrc
 # Reload config into running tmux server, if any
 tmux source-file "$HOME/.tmux.conf" 2>/dev/null || true
 

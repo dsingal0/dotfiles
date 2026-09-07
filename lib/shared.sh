@@ -842,10 +842,17 @@ persist_local_bin() {
     'export PATH="$HOME/.local/bin:$PATH"'
 }
 
+# Login shells (tmux panes run `-bash`) read ~/.profile, not ~/.bashrc, where
+# installers (bun.sh, nvm) and the persist_*_to_rc helpers append PATH/env
+# setup. Bridge the two so new shells pick up tool PATHs without restarting
+# the tmux server (a running tmux server freezes PATH at server start).
+link_profile_to_bashrc() {
+  if [[ -f "$HOME/.profile" ]] && ! grep -qxF '. "$HOME/.bashrc"' "$HOME/.profile"; then
+    echo '. "$HOME/.bashrc"' >> "$HOME/.profile"
+  fi
+}
 
 
-
-# Install oh-my-pi (omp), the Rust-core coding agent (the harness of record
 # since Sept 2026; opencode + oh-my-opencode-slim were removed after the
 # side-by-side trial). Vanilla setup: built-in agents/roles, no plugins.
 install_omp() {
