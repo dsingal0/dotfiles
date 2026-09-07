@@ -82,9 +82,6 @@ configure_omp
 # every project session follows the same global rules.
 install_global_agents_md "$SCRIPT_DIR"
 
-# Install/update Meta CLI.
-curl -fsSL https://dev.meta.ai/install.sh | bash
-
 configure_runlayer_mcp
 
 # Install droid (Factory CLI) - npm always runs postinstall scripts, so the

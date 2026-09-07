@@ -121,7 +121,6 @@ generated harness configs at setup time.
 - **Rust** / Cargo (+ `LIBCLANG_PATH` for bindgen)
 - **rtk** (curl installer)
 - **croc** (file transfer, GitHub release binary)
-- **Meta CLI**
 
 ### Arch Linux (`setup-arch.sh`)
 

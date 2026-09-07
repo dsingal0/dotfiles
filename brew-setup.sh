@@ -53,9 +53,6 @@ configure_omp
 # every project session follows the same global rules.
 install_global_agents_md "$SCRIPT_DIR"
 
-# Install/update Meta CLI.
-curl -fsSL https://dev.meta.ai/install.sh | bash
-
 # Drop the droid binary left by the old curl installer (~/.local/bin/droid) so
 # the npm-managed binary is the one on PATH.
 rm -f "$HOME/.local/bin/droid" 2>/dev/null || true
