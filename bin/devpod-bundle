@@ -25,8 +25,15 @@
 # API key inline, config.yml with roles + fallback chain, mcp.json, and the
 # AGENTS.md symlink target config/omp/AGENTS.md from this dotfiles repo).
 # Bundling agent/ restores the full harness config on the pod; the models.yml
-# key is verified on restore.
+# key is verified on restore. The runlayer MCP OAuth credential is NOT a file:
+# omp keeps it in agent.db (auth_credentials table), so it is extracted into
+# .omp/agent/mcp-runlayer-auth.json in the archive and merged into the pod's
+# agent.db on restore. agent.db itself is excluded (machine-local, huge).
 #
+# Settings sync: this bundle IS the transport for omp settings to dev pods
+# (live models.yml / config.yml / mcp.json + runlayer auth are packed fresh
+# on every run). The dotfiles repo only supplies AGENTS.md + skills.
+
 # Cursor CLI (cursor-agent) auth is file-based: set AGENT_CLI_CREDENTIAL_STORE=file
 # so it writes ~/.cursor/auth.json on macOS (and reads ~/.config/cursor/auth.json
 # on Linux) instead of the macOS Keychain. That auth.json IS bundled; on restore
@@ -72,6 +79,70 @@ try:
 except Exception:
     sys.exit(1)
 sys.exit(1)
+PYEOF
+}
+
+# Dump omp's runlayer MCP OAuth credential row (from ~/.omp/agent/agent.db,
+# auth_credentials table) as JSON on stdout, or nothing if not present. The row
+# travels in the archive as .omp/agent/mcp-runlayer-auth.json and is merged
+# into the pod's agent.db by --restore (omp keeps MCP OAuth tokens only there;
+# there is no standalone runlayer auth file).
+omp_runlayer_auth_row() {
+  python3 - << 'PYEOF'
+import json, os, sqlite3, sys
+
+db = os.path.expanduser("~/.omp/agent/agent.db")
+if not os.path.exists(db):
+    sys.exit(0)
+try:
+    con = sqlite3.connect(db)
+    rows = con.execute(
+        "SELECT provider, credential_type, identity_key, data FROM auth_credentials "
+        "WHERE provider LIKE 'mcp_oauth:%runlayer.com/mcp' "
+        "ORDER BY updated_at DESC LIMIT 1"
+    ).fetchall()
+    con.close()
+except sqlite3.Error:
+    sys.exit(0)
+if rows:
+    provider, cred_type, identity_key, data = rows[0]
+    print(json.dumps({
+        "provider": provider,
+        "credential_type": cred_type,
+        "identity_key": identity_key,
+        "data": data,
+    }))
+PYEOF
+}
+
+# Merge a bundled .omp/agent/mcp-runlayer-auth.json into this machine's omp
+# agent.db (upsert by provider) and remove the staged file; if agent.db does
+# not exist yet (omp never ran here), leave the file and say what to do.
+omp_merge_runlayer_auth() {
+  local src="$HOME_DIR/.omp/agent/mcp-runlayer-auth.json"
+  [[ -f "$src" ]] || return 0
+  python3 - "$src" << 'PYEOF'
+import json, os, sqlite3, sys
+
+src, db = sys.argv[1], os.path.expanduser("~/.omp/agent/agent.db")
+with open(src) as f:
+    row = json.load(f)
+if not os.path.exists(db):
+    print("runlayer mcp auth: agent.db not found (omp has not run here yet).")
+    print("  Staged at ~/.omp/agent/mcp-runlayer-auth.json; start omp once,")
+    print("  then re-run: devpod-bundle --restore (to finish the merge).")
+    sys.exit(0)
+con = sqlite3.connect(db)
+con.execute("DELETE FROM auth_credentials WHERE provider = ?", (row["provider"],))
+con.execute(
+    "INSERT INTO auth_credentials (provider, credential_type, data, identity_key) "
+    "VALUES (?, ?, ?, ?)",
+    (row["provider"], row["credential_type"], row["data"], row.get("identity_key")),
+)
+con.commit()
+con.close()
+os.remove(src)
+print("runlayer mcp auth: merged into ~/.omp/agent/agent.db (restart omp to use it)")
 PYEOF
 }
 
@@ -129,6 +200,11 @@ if [ -n "$RESTORE_FILE" ]; then
     chmod 600 "$HOME_DIR/.config/cursor/auth.json"
     echo "cursor auth: placed ~/.cursor/auth.json at ~/.config/cursor/auth.json (Linux path)"
   fi
+
+  # Merge the bundled runlayer MCP OAuth credential into omp's agent.db (or
+  # leave it staged if omp has not created agent.db yet — the helper prints
+  # what to do in that case).
+  omp_merge_runlayer_auth
 
   # Verify omp config landed (models.yml with an inline apiKey, written by
   # configure_omp in the dotfiles setup).
@@ -272,7 +348,23 @@ if [ ${#missing[@]} -gt 0 ]; then
   printf '  %s\n' "${missing[@]}" >&2
 fi
 
+# omp runlayer MCP OAuth credential: extracted from agent.db into the staging
+# dir so it lands in the archive at .omp/agent/mcp-runlayer-auth.json. --restore
+# merges it back into the pod's agent.db (omp stores MCP OAuth tokens there).
+STAGE_MCP_AUTH=""
+if omp_runlayer_auth_row > "$HOME_DIR/.omp/agent/.mcp-auth-row.tmp" 2>/dev/null \
+   && [ -s "$HOME_DIR/.omp/agent/.mcp-auth-row.tmp" ]; then
+  STAGE_MCP_AUTH="mcp-runlayer-auth.json"
+else
+  rm -f "$HOME_DIR/.omp/agent/.mcp-auth-row.tmp"
+  missing+=("omp runlayer MCP OAuth credential (not in agent.db — run \`omp\` and auth runlayer first)  (~/.omp/agent/agent.db)")
+fi
+
 if [ "$LIST_ONLY" -eq 1 ]; then
+  if [ -n "$STAGE_MCP_AUTH" ]; then
+    echo "  omp runlayer MCP auth -> ~/.omp/agent/mcp-runlayer-auth.json (from agent.db)"
+  fi
+  rm -f "$HOME_DIR/.omp/agent/.mcp-auth-row.tmp"
   exit 0
 fi
 
@@ -280,6 +372,11 @@ fi
 # how to restore it.
 TMP_BUNDLE="$(mktemp -d)"
 trap 'rm -rf "$TMP_BUNDLE"' EXIT
+if [ -n "$STAGE_MCP_AUTH" ]; then
+  mkdir -p "$TMP_BUNDLE/.omp/agent"
+  mv "$HOME_DIR/.omp/agent/.mcp-auth-row.tmp" "$TMP_BUNDLE/.omp/agent/mcp-runlayer-auth.json"
+  chmod 600 "$TMP_BUNDLE/.omp/agent/mcp-runlayer-auth.json"
+fi
 {
   echo "devpod-bundle"
   echo "============="
@@ -293,6 +390,11 @@ trap 'rm -rf "$TMP_BUNDLE"' EXIT
     echo "Not bundled on source host:"
     printf '  %s\n' "${missing[@]}"
   fi
+  echo
+  echo "Transport the bundle to the pod (any one of):"
+  echo "  croc send <bundle>.tar.gz          # pod: croc <code>"
+  echo "  wormhole send <bundle>.tar.gz      # pod: wormhole receive <code>"
+  echo "  rsync -av <bundle>.tar.gz <pod>:   # or plain scp"
   echo
   echo "Restore on the pod:"
   echo "  ~/dotfiles/devpod-bundle --restore <bundle>.tar.gz"
@@ -320,16 +422,23 @@ trap 'rm -rf "$TMP_BUNDLE"' EXIT
   echo "  - $omp_cred_note"
   echo "  - truss (Baseten) credentials ARE bundled via ~/.trussrc. If the"
   echo "    remote needs re-auth on the pod, run \`truss login\`."
+  echo "  - omp runlayer MCP auth (OAuth token from agent.db) IS bundled at"
+  echo "    .omp/agent/mcp-runlayer-auth.json; --restore merges it into the"
+  echo "    pod's ~/.omp/agent/agent.db. If it has expired there, re-auth"
+  echo "    runlayer from omp on the pod."
 } > "$TMP_BUNDLE/RESTORE.txt"
 
 # Build the archive. Paths are stored relative to $HOME via -C "$HOME_DIR";
-# RESTORE.txt is added from the temp dir with a second -C. Excludes drop the
-# stale known_hosts backup and any stray agent sockets.
+# RESTORE.txt (and the staged runlayer MCP auth json, if any) are added from
+# the temp dir with a second -C. Excludes drop the stale known_hosts backup
+# and any stray agent sockets.
+tar_extra=()
+[ -n "$STAGE_MCP_AUTH" ] && tar_extra+=(".omp/agent/mcp-runlayer-auth.json")
 tar -czf "$OUT" \
   --exclude='.ssh/known_hosts.old' \
   --exclude='*.sock' \
   -C "$HOME_DIR" "${rel_paths[@]}" \
-  -C "$TMP_BUNDLE" RESTORE.txt
+  -C "$TMP_BUNDLE" RESTORE.txt "${tar_extra[@]}"
 
 chmod 600 "$OUT"
 
@@ -340,4 +449,15 @@ echo "archive contents:"
 tar -tzf "$OUT" | sed 's/^/  /'
 echo
 echo "send it:   croc send \"$OUT\""
+echo "           (or) magic-wormhole:  wormhole send \"$OUT\""
+echo "                (wormhole is the ~/venv magic-wormhole CLI, symlinked"
+echo "                 to ~/.local/bin/wormhole by ensure_venv in the setup)"
+echo "           (or) rsync:           rsync -av \"$OUT\" <pod>:"
+echo
+echo "receive on the pod:"
+echo "           croc           -> croc <code>          (asks for the code)"
+echo "           magic-wormhole -> wormhole receive <code>   (auto-named file)"
+echo "                (the pod gets the same ~/.local/bin/wormhole symlink"
+echo "                 from ~/venv via ensure_venv in the dotfiles setup)"
+echo
 echo "restore:   ~/dotfiles/devpod-bundle --restore \"$OUT\"   (on the pod)"
