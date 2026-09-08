@@ -45,6 +45,16 @@
 # macOS login keychain (auth.v2.loginkeychain, which is NOT portable to Linux).
 # The auth.v2.file/key pair IS bundled.
 #
+# docker CLI auth is file-based on this setup: ~/.docker/config.json holds the
+# Hub login + access/refresh tokens inline (no credsStore), so it bundles as
+# a plain file and works as-is on the pod.
+#
+# gh (GitHub CLI) keeps its OAuth token in the macOS keyring (NOT portable),
+# so at bundle time `gh auth token` is used to stage a keyring-free
+# hosts.yml with the token inline; it is bundled as .config/gh/hosts.yml,
+# overriding the token-less copy. gh on the pod then needs no keyring.
+# Verify with `gh auth status` (restore does this too).
+#
 # The output file is mode 600 (it contains secrets). Re-run anytime; each
 # bundle produces a new timestamped archive and leaves old ones in place.
 #
@@ -146,6 +156,33 @@ print("runlayer mcp auth: merged into ~/.omp/agent/agent.db (restart omp to use 
 PYEOF
 }
 
+# Stage a pod-ready gh hosts.yml: the local one has no oauth_token (the token
+# lives in the macOS keyring), so fetch it via `gh auth token` and write a
+# keyring-free hosts.yml to stdout. On restore it is copied over the bundled
+# hosts.yml so gh works on the pod without a keyring round-trip. Prints
+# nothing (and returns 1) when gh is not authenticated here.
+stage_gh_hosts_yml() {
+  local token
+  token="$(gh auth token 2>/dev/null)" || return 1
+  [ -n "$token" ] || return 1
+  GH_TOKEN="$token" python3 - "$HOME_DIR/.config/gh/hosts.yml" << 'PYEOF'
+import os, re, sys
+
+token = os.environ["GH_TOKEN"]
+lines = open(sys.argv[1]).read().splitlines()
+out, injected = [], False
+for line in lines:
+    if not injected and re.match(r"^\s*user:\s", line):
+        indent = line[: len(line) - len(line.lstrip())]
+        out.append(f"{indent}oauth_token: {token}")
+        injected = True
+    out.append(line)
+if not injected:
+    sys.exit(1)
+print("\n".join(out) + "\n")
+PYEOF
+}
+
 # --------------------------------------------------------------------------- args
 OUT=""
 LIST_ONLY=0
@@ -205,6 +242,28 @@ if [ -n "$RESTORE_FILE" ]; then
   # leave it staged if omp has not created agent.db yet — the helper prints
   # what to do in that case).
   omp_merge_runlayer_auth
+
+  # gh: the bundle's hosts.yml carries the oauth_token inline (staged from the
+  # source machine's keyring), so no keyring is needed here. Verify gh sees it.
+  if command -v gh >/dev/null 2>&1; then
+    if gh auth status >/dev/null 2>&1; then
+      echo "gh auth: OK ($(gh auth status 2>&1 | grep -oE 'account [^ ]+' | head -1 | cut -d' ' -f2-) — token from bundled hosts.yml)"
+    else
+      echo "WARNING: gh did not accept the bundled token — run \`gh auth login\` here."
+    fi
+  else
+    echo "gh auth: bundled at ~/.config/gh/hosts.yml (gh not installed here to verify)"
+  fi
+
+  # docker: credentials are inline in the bundled config.json. Verify docker
+  # sees a Hub login when the CLI is present (docker context may not exist on
+  # a fresh pod; that's fine — only the credential file matters).
+  if [[ -f "$HOME_DIR/.docker/config.json" ]]; then
+    n_auths="$(python3 -c "import json; print(len(json.load(open('$HOME_DIR/.docker/config.json')).get('auths', {})))" 2>/dev/null || echo '?')"
+    echo "docker auth: bundled at ~/.docker/config.json (${n_auths} auth entries)"
+  else
+    echo "docker auth: not bundled (no ~/.docker/config.json in this bundle)"
+  fi
 
   # Verify omp config landed (models.yml with an inline apiKey, written by
   # configure_omp in the dotfiles setup).
@@ -298,6 +357,25 @@ labels+=(
   "grok CLI settings"
 )
 
+# docker CLI: auth lives inline in ~/.docker/config.json (auths with base64
+# credentials + Hub access/refresh tokens, no credsStore/keyring on this
+# setup), so it is fully portable as a file.
+abs_paths+=("$HOME_DIR/.docker/config.json")
+labels+=("docker CLI auth (Hub login + tokens, inline in config.json)")
+
+# gh (GitHub CLI): config.yml/hosts.yml are plain files, but the OAuth token is
+# in the macOS keyring on this machine (gh auth status says "(keyring)").
+# Bundle the settings; the token itself is staged separately as a keyring-free
+# hosts.yml (stage_gh_hosts_yml below) and written on restore.
+abs_paths+=(
+  "$HOME_DIR/.config/gh/config.yml"
+  "$HOME_DIR/.config/gh/hosts.yml"
+)
+labels+=(
+  "gh CLI settings"
+  "gh CLI hosts (accounts + git protocol; token staged separately)"
+)
+
 # truss (Baseten) CLI
 abs_paths+=("$HOME_DIR/.trussrc")
 labels+=("truss CLI credentials (Baseten remotes)")
@@ -360,11 +438,27 @@ else
   missing+=("omp runlayer MCP OAuth credential (not in agent.db — run \`omp\` and auth runlayer first)  (~/.omp/agent/agent.db)")
 fi
 
+# gh OAuth token: staged from the keyring into a pod-ready hosts.yml
+# (.config/gh/hosts.yml) that carries oauth_token inline, overwriting the
+# bundled keyring-less hosts.yml in the archive. Without this, gh on a
+# keyring-less pod cannot read the token from the macOS keyring.
+STAGE_GH_AUTH=""
+if stage_gh_hosts_yml > "$HOME_DIR/.config/gh/.hosts-with-token.tmp" 2>/dev/null \
+   && [ -s "$HOME_DIR/.config/gh/.hosts-with-token.tmp" ]; then
+  STAGE_GH_AUTH="hosts.yml"
+else
+  rm -f "$HOME_DIR/.config/gh/.hosts-with-token.tmp"
+  missing+=("gh CLI OAuth token (gh not authenticated here? run \`gh auth login\`)  (~/.config/gh)")
+fi
+
 if [ "$LIST_ONLY" -eq 1 ]; then
   if [ -n "$STAGE_MCP_AUTH" ]; then
     echo "  omp runlayer MCP auth -> ~/.omp/agent/mcp-runlayer-auth.json (from agent.db)"
   fi
-  rm -f "$HOME_DIR/.omp/agent/.mcp-auth-row.tmp"
+  if [ -n "$STAGE_GH_AUTH" ]; then
+    echo "  gh CLI auth -> ~/.config/gh/hosts.yml (oauth_token staged from keyring)"
+  fi
+  rm -f "$HOME_DIR/.omp/agent/.mcp-auth-row.tmp" "$HOME_DIR/.config/gh/.hosts-with-token.tmp"
   exit 0
 fi
 
@@ -376,6 +470,15 @@ if [ -n "$STAGE_MCP_AUTH" ]; then
   mkdir -p "$TMP_BUNDLE/.omp/agent"
   mv "$HOME_DIR/.omp/agent/.mcp-auth-row.tmp" "$TMP_BUNDLE/.omp/agent/mcp-runlayer-auth.json"
   chmod 600 "$TMP_BUNDLE/.omp/agent/mcp-runlayer-auth.json"
+fi
+# The staged hosts.yml (with oauth_token inline) is tarred as .config/gh/hosts.yml,
+# overriding the keyring-less copy from $HOME (tar uses the LAST -C block for
+# duplicate paths, so this must come after the -C "$HOME_DIR" entries — it does:
+# both staged files are added in the final -C "$TMP_BUNDLE" group).
+if [ -n "$STAGE_GH_AUTH" ]; then
+  mkdir -p "$TMP_BUNDLE/.config/gh"
+  mv "$HOME_DIR/.config/gh/.hosts-with-token.tmp" "$TMP_BUNDLE/.config/gh/hosts.yml"
+  chmod 600 "$TMP_BUNDLE/.config/gh/hosts.yml"
 fi
 {
   echo "devpod-bundle"
@@ -426,6 +529,14 @@ fi
   echo "    .omp/agent/mcp-runlayer-auth.json; --restore merges it into the"
   echo "    pod's ~/.omp/agent/agent.db. If it has expired there, re-auth"
   echo "    runlayer from omp on the pod."
+  echo "  - docker CLI auth IS bundled via ~/.docker/config.json (Hub login +"
+  echo "    access/refresh tokens inline; no credsStore on this setup)."
+  echo "    Verify on the pod with: docker login (should already be logged in)"
+  echo "    or pull a private image."
+  echo "  - gh CLI auth IS bundled: config.yml + hosts.yml, where hosts.yml"
+  echo "    carries the OAuth token inline (staged from the source machine's"
+  echo "    keyring — the pod needs no keyring). If it has expired there,"
+  echo "    re-run \`gh auth login\` on the pod. Verify: gh auth status."
 } > "$TMP_BUNDLE/RESTORE.txt"
 
 # Build the archive. Paths are stored relative to $HOME via -C "$HOME_DIR";
@@ -434,6 +545,9 @@ fi
 # and any stray agent sockets.
 tar_extra=()
 [ -n "$STAGE_MCP_AUTH" ] && tar_extra+=(".omp/agent/mcp-runlayer-auth.json")
+# duplicate .config/gh/hosts.yml: the staged (token-carrying) copy comes last,
+# so it overwrites the keyring-less one during extraction.
+[ -n "$STAGE_GH_AUTH" ] && tar_extra+=(".config/gh/hosts.yml")
 tar -czf "$OUT" \
   --exclude='.ssh/known_hosts.old' \
   --exclude='*.sock' \

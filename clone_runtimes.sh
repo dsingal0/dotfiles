@@ -9,6 +9,7 @@ REPOS=(
   "git@github.com:basetenlabs/baseten.git:baseten"
   "git@github.com:basetenlabs/truss.git:truss"
   "git@github.com:basetenlabs/dynamo.git:baseten_dynamo"
+  "git@github.com:basetenlabs/bei.git:bei"
   "git@github.com:dsingal0/vllm.git:dsingal_vllm"
   "git@github.com:dsingal0/async_work_reports.git:async_work_reports"
   "git@github.com:basetenlabs/mirendil-rollout.git:mirendil-rollout"
