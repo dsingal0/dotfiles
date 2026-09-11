@@ -164,7 +164,7 @@ rtk init --show
 # Configure git identity for remote dev pods (idempotent)
 echo "Configuring git identity..."
 git config --global user.name "Dhruv Singal"
-git config --global user.email "dhruvsingalabc@gmail.com"
+git config --global user.email "dhruv.singalabc@gmail.com"
 
 # Configure Factory: Baseten BYOK custom models (~/.factory/settings.json) and
 # FACTORY_API_KEY exported to shell rc files for the droid CLI.

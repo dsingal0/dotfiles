@@ -123,6 +123,11 @@ echo "Installing cursor-cli..."
 curl -fsS https://cursor.com/install | bash
 cursor --version 2>/dev/null || true
 
+# Configure git identity (idempotent)
+echo "Configuring git identity..."
+git config --global user.name "Dhruv Singal"
+git config --global user.email "dhruv.singalabc@gmail.com"
+
 # droid is installed via npm above
 
 # Configure Factory: Baseten BYOK custom models (~/.factory/settings.json) and
