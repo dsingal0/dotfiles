@@ -853,8 +853,7 @@ link_profile_to_bashrc() {
 }
 
 
-# since Sept 2026; opencode + oh-my-opencode-slim were removed after the
-# side-by-side trial). Vanilla setup: built-in agents/roles, no plugins.
+# Vanilla omp setup: built-in agents/roles, no plugins.
 install_omp() {
   echo "Installing oh-my-pi (omp)..."
   # The omp package ships a bun-compiled binary (#!/usr/bin/env bun), so bun
