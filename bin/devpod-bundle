@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # devpod-bundle - pack auth + settings for SSH, omp (oh-my-pi), factory droid,
-# cursor CLI, grok CLI, and truss (Baseten) into a single tar.gz so they can
-# be sent via croc to a dev pod and unpacked into the right locations.
+# and truss (Baseten) into a single tar.gz so they can be sent via croc to a
+# dev pod and unpacked into the right locations.
 #
 # Two modes:
 #
@@ -24,22 +24,16 @@
 # omp (oh-my-pi) config lives in ~/.omp/agent/ (models.yml with the Baseten
 # API key inline, config.yml with roles + fallback chain, mcp.json, and the
 # AGENTS.md symlink target config/omp/AGENTS.md from this dotfiles repo).
-# Bundling agent/ restores the full harness config on the pod; the models.yml
-# key is verified on restore. The runlayer MCP OAuth credential is NOT a file:
-# omp keeps it in agent.db (auth_credentials table), so it is extracted into
-# .omp/agent/mcp-runlayer-auth.json in the archive and merged into the pod's
-# agent.db on restore. agent.db itself is excluded (machine-local, huge).
+# OMP keeps every provider login in agent.db's auth_credentials table. The
+# complete table is exported to .omp/agent/omp-auth-credentials.json in the
+# archive and merged into the pod's agent.db on restore. agent.db itself is
+# excluded (machine-local, huge).
 #
-# Settings sync: this bundle IS the transport for omp settings to dev pods
-# (live models.yml / config.yml / mcp.json + runlayer auth are packed fresh
-# on every run). The dotfiles repo only supplies AGENTS.md + skills.
+# Settings sync: this bundle IS the transport for omp settings and provider
+# credentials to dev pods (models.yml / config.yml / mcp.json + all provider
+# auth are packed fresh on every run). The dotfiles repo supplies AGENTS.md +
+# skills.
 
-# Cursor CLI (cursor-agent) auth is file-based: set AGENT_CLI_CREDENTIAL_STORE=file
-# so it writes ~/.cursor/auth.json on macOS (and reads ~/.config/cursor/auth.json
-# on Linux) instead of the macOS Keychain. That auth.json IS bundled; on restore
-# it is copied to ~/.config/cursor/auth.json on Linux. ~/.cursor/env (CURSOR_API_KEY)
-# is also bundled and sourced by shell rc (legacy, kept for compatibility).
-#
 # factory droid auth is file-based too: set FACTORY_DISABLE_KEYRING=1 so droid
 # writes the portable ~/.factory/auth.v2.file + auth.v2.key pair instead of the
 # macOS login keychain (auth.v2.loginkeychain, which is NOT portable to Linux).
@@ -61,8 +55,7 @@
 # Usage:
 #   devpod-bundle                          # write ~/devpod-bundle-<stamp>.tar.gz
 #   devpod-bundle --list                   # show what would be packed, write nothing
-#   devpod-bundle -o /tmp/x.tgz            # write to a custom path
-#   devpod-bundle --restore <bundle>.tar.gz        # extract into $HOME (pod)
+#   devpod-bundle -o ~/devpod-bundle-custom.tar.gz  # write to a custom path
 #   devpod-bundle --restore <bundle>.tar.gz --dry-run  # list only, extract nothing
 
 set -euo pipefail
@@ -92,67 +85,105 @@ sys.exit(1)
 PYEOF
 }
 
-# Dump omp's runlayer MCP OAuth credential row (from ~/.omp/agent/agent.db,
-# auth_credentials table) as JSON on stdout, or nothing if not present. The row
-# travels in the archive as .omp/agent/mcp-runlayer-auth.json and is merged
-# into the pod's agent.db by --restore (omp keeps MCP OAuth tokens only there;
-# there is no standalone runlayer auth file).
-omp_runlayer_auth_row() {
+# Dump every OMP credential from ~/.omp/agent/agent.db as one JSON document.
+# The auth_credentials table contains OAuth/API credentials for all providers;
+# do not special-case a provider here because new OMP logins must travel too.
+omp_auth_credentials_json() {
   python3 - << 'PYEOF'
 import json, os, sqlite3, sys
 
 db = os.path.expanduser("~/.omp/agent/agent.db")
 if not os.path.exists(db):
-    sys.exit(0)
+    sys.exit(1)
 try:
     con = sqlite3.connect(db)
     rows = con.execute(
-        "SELECT provider, credential_type, identity_key, data FROM auth_credentials "
-        "WHERE provider LIKE 'mcp_oauth:%runlayer.com/mcp' "
-        "ORDER BY updated_at DESC LIMIT 1"
+        "SELECT provider, credential_type, data, disabled_cause, identity_key, "
+        "created_at, updated_at FROM auth_credentials ORDER BY id"
     ).fetchall()
     con.close()
 except sqlite3.Error:
-    sys.exit(0)
-if rows:
-    provider, cred_type, identity_key, data = rows[0]
-    print(json.dumps({
-        "provider": provider,
-        "credential_type": cred_type,
-        "identity_key": identity_key,
-        "data": data,
-    }))
+    sys.exit(1)
+if not rows:
+    sys.exit(1)
+print(json.dumps([
+    {
+        "provider": row[0],
+        "credential_type": row[1],
+        "data": row[2],
+        "disabled_cause": row[3],
+        "identity_key": row[4],
+        "created_at": row[5],
+        "updated_at": row[6],
+    }
+    for row in rows
+], separators=(",", ":")))
 PYEOF
 }
 
-# Merge a bundled .omp/agent/mcp-runlayer-auth.json into this machine's omp
-# agent.db (upsert by provider) and remove the staged file; if agent.db does
-# not exist yet (omp never ran here), leave the file and say what to do.
-omp_merge_runlayer_auth() {
-  local src="$HOME_DIR/.omp/agent/mcp-runlayer-auth.json"
+# Merge all bundled OMP credentials into this machine's agent.db.
+# Matching uses provider + credential_type + identity_key so repeated restores
+# update existing accounts instead of creating duplicates, while preserving
+# unrelated credentials already present on the destination.
+omp_merge_auth_credentials() {
+  local src="$HOME_DIR/.omp/agent/omp-auth-credentials.json"
   [[ -f "$src" ]] || return 0
   python3 - "$src" << 'PYEOF'
 import json, os, sqlite3, sys
 
 src, db = sys.argv[1], os.path.expanduser("~/.omp/agent/agent.db")
 with open(src) as f:
-    row = json.load(f)
+    rows = json.load(f)
+if not isinstance(rows, list):
+    raise SystemExit("omp auth: invalid credential document")
 if not os.path.exists(db):
-    print("runlayer mcp auth: agent.db not found (omp has not run here yet).")
-    print("  Staged at ~/.omp/agent/mcp-runlayer-auth.json; start omp once,")
+    print("omp auth: agent.db not found (omp has not run here yet).")
+    print("  Staged at ~/.omp/agent/omp-auth-credentials.json; start omp once,")
     print("  then re-run: devpod-bundle --restore (to finish the merge).")
     sys.exit(0)
+
 con = sqlite3.connect(db)
-con.execute("DELETE FROM auth_credentials WHERE provider = ?", (row["provider"],))
-con.execute(
-    "INSERT INTO auth_credentials (provider, credential_type, data, identity_key) "
-    "VALUES (?, ?, ?, ?)",
-    (row["provider"], row["credential_type"], row["data"], row.get("identity_key")),
-)
-con.commit()
-con.close()
+try:
+    for row in rows:
+        key = (row["provider"], row["credential_type"], row.get("identity_key"))
+        existing = con.execute(
+            "SELECT id FROM auth_credentials "
+            "WHERE provider = ? AND credential_type = ? AND identity_key IS ? "
+            "ORDER BY id LIMIT 1",
+            key,
+        ).fetchone()
+        values = (
+            row["data"],
+            row.get("disabled_cause"),
+            row.get("created_at"),
+            row.get("updated_at"),
+        )
+        if existing:
+            con.execute(
+                "UPDATE auth_credentials SET data = ?, disabled_cause = ?, "
+                "created_at = ?, updated_at = ? WHERE id = ?",
+                values + (existing[0],),
+            )
+        else:
+            con.execute(
+                "INSERT INTO auth_credentials "
+                "(provider, credential_type, data, disabled_cause, identity_key, "
+                "created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+                (
+                    row["provider"],
+                    row["credential_type"],
+                    row["data"],
+                    row.get("disabled_cause"),
+                    row.get("identity_key"),
+                    row.get("created_at"),
+                    row.get("updated_at"),
+                ),
+            )
+    con.commit()
+finally:
+    con.close()
 os.remove(src)
-print("runlayer mcp auth: merged into ~/.omp/agent/agent.db (restart omp to use it)")
+print(f"omp auth: merged {len(rows)} credential(s) into ~/.omp/agent/agent.db")
 PYEOF
 }
 
@@ -228,20 +259,10 @@ if [ -n "$RESTORE_FILE" ]; then
   # Skip the embedded RESTORE.txt note so it doesn't litter ~; print it below.
   tar -xzf "$RESTORE_FILE" -C "$HOME_DIR" --exclude=RESTORE.txt
 
-  # cursor-agent reads its file-store auth at ~/.cursor/auth.json on macOS but
-  # ~/.config/cursor/auth.json on Linux. The bundle stores it as .cursor/auth.json;
-  # on a Linux pod, place it where the CLI actually looks for it.
-  if [[ "$(uname -s)" != "Darwin" && -f "$HOME_DIR/.cursor/auth.json" ]]; then
-    mkdir -p "$HOME_DIR/.config/cursor"
-    cp -f "$HOME_DIR/.cursor/auth.json" "$HOME_DIR/.config/cursor/auth.json"
-    chmod 600 "$HOME_DIR/.config/cursor/auth.json"
-    echo "cursor auth: placed ~/.cursor/auth.json at ~/.config/cursor/auth.json (Linux path)"
-  fi
 
-  # Merge the bundled runlayer MCP OAuth credential into omp's agent.db (or
-  # leave it staged if omp has not created agent.db yet — the helper prints
-  # what to do in that case).
-  omp_merge_runlayer_auth
+  # Merge every bundled OMP provider credential into agent.db. If omp has not
+  # created agent.db yet, the helper leaves the JSON staged for a later restore.
+  omp_merge_auth_credentials
 
   # gh: the bundle's hosts.yml carries the oauth_token inline (staged from the
   # source machine's keyring), so no keyring is needed here. Verify gh sees it.
@@ -333,29 +354,6 @@ labels+=(
   "factory droid cron missions (dir)"
 )
 
-# cursor CLI
-abs_paths+=(
-  "$HOME_DIR/.cursor/cli-config.json"
-  "$HOME_DIR/.cursor/agent-cli-state.json"
-  "$HOME_DIR/.cursor/env"
-  "$HOME_DIR/.cursor/auth.json"
-)
-labels+=(
-  "cursor CLI settings"
-  "cursor CLI state"
-  "cursor CLI auth (API key)"
-  "cursor CLI auth (file store: ~/.cursor/auth.json)"
-)
-
-# grok CLI
-abs_paths+=(
-  "$HOME_DIR/.grok/auth.json"
-  "$HOME_DIR/.grok/config.toml"
-)
-labels+=(
-  "grok CLI auth"
-  "grok CLI settings"
-)
 
 # docker CLI: auth lives inline in ~/.docker/config.json (auths with base64
 # credentials + Hub access/refresh tokens, no credsStore/keyring on this
@@ -426,16 +424,15 @@ if [ ${#missing[@]} -gt 0 ]; then
   printf '  %s\n' "${missing[@]}" >&2
 fi
 
-# omp runlayer MCP OAuth credential: extracted from agent.db into the staging
-# dir so it lands in the archive at .omp/agent/mcp-runlayer-auth.json. --restore
-# merges it back into the pod's agent.db (omp stores MCP OAuth tokens there).
-STAGE_MCP_AUTH=""
-if omp_runlayer_auth_row > "$HOME_DIR/.omp/agent/.mcp-auth-row.tmp" 2>/dev/null \
-   && [ -s "$HOME_DIR/.omp/agent/.mcp-auth-row.tmp" ]; then
-  STAGE_MCP_AUTH="mcp-runlayer-auth.json"
+# OMP stores provider OAuth/API credentials in agent.db. Stage the complete
+# auth_credentials table so every logged-in provider travels with the bundle.
+STAGE_OMP_AUTH=""
+if omp_auth_credentials_json > "$HOME_DIR/.omp/agent/.auth-credentials.tmp" 2>/dev/null \
+   && [ -s "$HOME_DIR/.omp/agent/.auth-credentials.tmp" ]; then
+  STAGE_OMP_AUTH="omp-auth-credentials.json"
 else
-  rm -f "$HOME_DIR/.omp/agent/.mcp-auth-row.tmp"
-  missing+=("omp runlayer MCP OAuth credential (not in agent.db — run \`omp\` and auth runlayer first)  (~/.omp/agent/agent.db)")
+  rm -f "$HOME_DIR/.omp/agent/.auth-credentials.tmp"
+  missing+=("omp provider credentials (none found in agent.db — log in with omp first)  (~/.omp/agent/agent.db)")
 fi
 
 # gh OAuth token: staged from the keyring into a pod-ready hosts.yml
@@ -452,24 +449,25 @@ else
 fi
 
 if [ "$LIST_ONLY" -eq 1 ]; then
-  if [ -n "$STAGE_MCP_AUTH" ]; then
-    echo "  omp runlayer MCP auth -> ~/.omp/agent/mcp-runlayer-auth.json (from agent.db)"
+  if [ -n "$STAGE_OMP_AUTH" ]; then
+    echo "  omp provider credentials -> ~/.omp/agent/omp-auth-credentials.json (all auth_credentials rows)"
   fi
   if [ -n "$STAGE_GH_AUTH" ]; then
     echo "  gh CLI auth -> ~/.config/gh/hosts.yml (oauth_token staged from keyring)"
   fi
-  rm -f "$HOME_DIR/.omp/agent/.mcp-auth-row.tmp" "$HOME_DIR/.config/gh/.hosts-with-token.tmp"
+  rm -f "$HOME_DIR/.omp/agent/.auth-credentials.tmp" "$HOME_DIR/.config/gh/.hosts-with-token.tmp"
   exit 0
 fi
 
 # Companion note placed at the archive root so the pod knows what it has and
 # how to restore it.
-TMP_BUNDLE="$(mktemp -d)"
+TMP_BUNDLE="$HOME_DIR/.cache/devpod-bundle.$$.$RANDOM"
+(umask 077 && mkdir -p "$TMP_BUNDLE")
 trap 'rm -rf "$TMP_BUNDLE"' EXIT
-if [ -n "$STAGE_MCP_AUTH" ]; then
+if [ -n "$STAGE_OMP_AUTH" ]; then
   mkdir -p "$TMP_BUNDLE/.omp/agent"
-  mv "$HOME_DIR/.omp/agent/.mcp-auth-row.tmp" "$TMP_BUNDLE/.omp/agent/mcp-runlayer-auth.json"
-  chmod 600 "$TMP_BUNDLE/.omp/agent/mcp-runlayer-auth.json"
+  mv "$HOME_DIR/.omp/agent/.auth-credentials.tmp" "$TMP_BUNDLE/.omp/agent/omp-auth-credentials.json"
+  chmod 600 "$TMP_BUNDLE/.omp/agent/omp-auth-credentials.json"
 fi
 # The staged hosts.yml (with oauth_token inline) is tarred as .config/gh/hosts.yml,
 # overriding the keyring-less copy from $HOME (tar uses the LAST -C block for
@@ -505,11 +503,6 @@ fi
   echo
   echo "Notes:"
   echo "  - File permissions are preserved (ssh keys stay 0600, etc.)."
-  echo "  - Cursor CLI auth IS included via ~/.cursor/auth.json (file store;"
-  echo "    set AGENT_CLI_CREDENTIAL_STORE=file so cursor-agent writes it instead"
-  echo "    of the macOS Keychain). On Linux it is placed at ~/.config/cursor/auth.json"
-  echo "    by --restore. Run \`agent status\` on the pod to verify. ~/.cursor/env"
-  echo "    (CURSOR_API_KEY) is bundled too but is legacy (not read by cursor-agent)."
   echo "  - factory droid auth (auth.v2.file + auth.v2.key) IS bundled. On the Mac"
   echo "    set FACTORY_DISABLE_KEYRING=1 so droid writes that portable pair instead"
   echo "    of the macOS login keychain (auth.v2.loginkeychain is NOT portable to"
@@ -525,10 +518,10 @@ fi
   echo "  - $omp_cred_note"
   echo "  - truss (Baseten) credentials ARE bundled via ~/.trussrc. If the"
   echo "    remote needs re-auth on the pod, run \`truss login\`."
-  echo "  - omp runlayer MCP auth (OAuth token from agent.db) IS bundled at"
-  echo "    .omp/agent/mcp-runlayer-auth.json; --restore merges it into the"
-  echo "    pod's ~/.omp/agent/agent.db. If it has expired there, re-auth"
-  echo "    runlayer from omp on the pod."
+  echo "  - omp provider credentials (all auth_credentials rows) ARE bundled at"
+  echo "    .omp/agent/omp-auth-credentials.json and merged into the pod's"
+  echo "    ~/.omp/agent/agent.db on restore. This includes every OMP login;"
+  echo "    re-authenticate only credentials that have expired."
   echo "  - docker CLI auth IS bundled via ~/.docker/config.json (Hub login +"
   echo "    access/refresh tokens inline; no credsStore on this setup)."
   echo "    Verify on the pod with: docker login (should already be logged in)"
@@ -540,17 +533,15 @@ fi
 } > "$TMP_BUNDLE/RESTORE.txt"
 
 # Build the archive. Paths are stored relative to $HOME via -C "$HOME_DIR";
-# RESTORE.txt (and the staged runlayer MCP auth json, if any) are added from
-# the temp dir with a second -C. Excludes drop the stale known_hosts backup
-# and any stray agent sockets.
+# RESTORE.txt and the staged OMP provider credentials / gh auth are added from
+# the temp dir with a second -C. Excludes drop the stale known_hosts backup and
+# any stray agent sockets.
 tar_extra=()
-[ -n "$STAGE_MCP_AUTH" ] && tar_extra+=(".omp/agent/mcp-runlayer-auth.json")
-# duplicate .config/gh/hosts.yml: the staged (token-carrying) copy comes last,
-# so it overwrites the keyring-less one during extraction.
+[ -n "$STAGE_OMP_AUTH" ] && tar_extra+=(".omp/agent/omp-auth-credentials.json")
 [ -n "$STAGE_GH_AUTH" ] && tar_extra+=(".config/gh/hosts.yml")
 tar -czf "$OUT" \
   --exclude='.ssh/known_hosts.old' \
-  --exclude='*.sock' \
+  --exclude='.ssh/agent' \
   -C "$HOME_DIR" "${rel_paths[@]}" \
   -C "$TMP_BUNDLE" RESTORE.txt "${tar_extra[@]}"
 

@@ -20,11 +20,7 @@ brew trust basetenlabs/baseten 2>/dev/null || true
 # `baseten` = basetenlabs/baseten-cli (https://github.com/basetenlabs/baseten-cli); `uv` for ~/venv + truss.
 # `bun` is required by the omp binary (see install_omp in lib/shared.sh).
 FORMULAS=(baseten btop bun croc gh node mole rtk tmux uv)
-# ghostty = terminal emulator. grok-build has no official curl installer, so it
-# is installed as a cask below.
-# font-jetbrains-mono-nerd-font = JetBrains Mono with Nerd Font glyphs for TUIs.
 CASKS=(brave-browser@beta ghostty font-jetbrains-mono-nerd-font)
-CASKS+=(grok-build)
 
 # Install (no-op if already installed). Continue on individual failures.
 for pkg in "${FORMULAS[@]}"; do
@@ -118,10 +114,7 @@ cp "$ALIASES_FILE" "$SCRIPT_DIR/baseten_aliases"
 
 configure_runlayer_mcp
 
-# Install cursor-cli (Cursor agent) via official installer
-echo "Installing cursor-cli..."
-curl -fsS https://cursor.com/install | bash
-cursor --version 2>/dev/null || true
+configure_rtk
 
 # Configure git identity (idempotent)
 echo "Configuring git identity..."
@@ -137,15 +130,13 @@ git config --global user.email "dhruv.singalabc@gmail.com"
 #   cp .env.example .env
 # Keys can also be exported directly: BASETEN_API_KEY=... FACTORY_API_KEY=... ./brew-setup.sh
 configure_factory "$SCRIPT_DIR"
-configure_cursor
-configure_grok_yolo
 
 # Remove the stale third-party baseten skill (basetenlabs/baseten-skills) so the
 # repo's static, pruned, BIS-focused copy (skills/baseten/) gets symlinked in
 # its place by install_shared_skills below.
 cleanup_stale_baseten_skill
 
-# Install personal skills into every harness (droid / omp / cursor / grok)
+# Install personal skills into OMP and Factory droid.
 install_shared_skills "$SCRIPT_DIR"
 
 # Third-party skill packs (mattpocock + expo + emilkowalski) for all agents. The

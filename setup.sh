@@ -136,9 +136,6 @@ for d in /usr/lib/llvm-*/lib; do
   fi
 done
 
-# Install/update Cursor CLI
-echo "Installing Cursor CLI..."
-curl https://cursor.com/install -fsS | bash
 
 
 # Install/update rtk (Rust Token Killer) - CLI proxy that cuts LLM token usage.
@@ -149,17 +146,8 @@ echo "Installing rtk..."
 curl -fsSL https://raw.githubusercontent.com/rtk-ai/rtk/refs/heads/master/install.sh | sh
 rtk --version
 
-# Initialize rtk hooks for the agents I use that rtk supports natively.
-# omp (Pi coding agent) and Cursor (preToolUse hook in ~/.cursor/hooks.json).
-# Cursor uses --hook-only --no-patch so it skips the Claude Code RTK.md /
-# CLAUDE.md / settings.json artifacts (I don't use Claude Code).
-# Note: rtk has no native Droid/Factory integration; Droid is not wired here.
-RTK_TELEMETRY_DISABLED=1 rtk init -g --agent pi
-# Cursor desktop isn't installed on Linux dev pods, so ~/.cursor may not exist;
-# rtk writes a temp file there during init and errors out without the dir.
-mkdir -p "$HOME/.cursor"
-RTK_TELEMETRY_DISABLED=1 rtk init -g --agent cursor --hook-only --no-patch
-rtk init --show
+# Initialize the RTK integration for OMP.
+configure_rtk
 
 # Configure git identity for remote dev pods (idempotent)
 echo "Configuring git identity..."
@@ -173,17 +161,16 @@ git config --global user.email "dhruv.singalabc@gmail.com"
 #   cp .env.example .env
 # Keys can also be exported directly: BASETEN_API_KEY=... FACTORY_API_KEY=... ./setup.sh
 configure_factory "$SCRIPT_DIR"
-configure_cursor
 
 # Remove the stale third-party baseten skill (basetenlabs/baseten-skills) so the
 # repo's static, pruned, BIS-focused copy (skills/baseten/) gets symlinked in
 # its place by install_shared_skills below.
 cleanup_stale_baseten_skill
 
-# Install personal skills into every harness (droid / omp / cursor).
+# Install personal skills into OMP and Factory droid.
 # Design skills (frontend-design) are skipped here and installed only by
 # brew-setup.sh (macOS).
-install_shared_skills "$SCRIPT_DIR" false "frontend-design"
+install_shared_skills "$SCRIPT_DIR" "frontend-design"
 
 # Third-party skill packs for all agents. Expo/EAS and design packs are skipped
 # here (Linux dev pods) and installed only by brew-setup.sh (macOS). The baseten

@@ -6,12 +6,12 @@
 #   SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 #   . "$SCRIPT_DIR/lib/shared.sh"
 #
-# It exposes the per-harness configuration functions (omp, droid/Factory,
-# cursor, grok) shared by the bootstrap scripts.
+# It exposes the per-harness configuration functions (omp and droid/Factory)
+# shared by the bootstrap scripts.
 
 
 # Ensure runlayer MCP (https://baseten.runlayer.com/mcp) is configured in
-# the three harnesses: omp, droid, and cursor-cli. Idempotent.
+# the two harnesses: omp and droid/Factory. Idempotent.
 configure_runlayer_mcp() {
   local url="https://baseten.runlayer.com/mcp"
   # omp -> ~/.omp/agent/mcp.json (mcpServers.<name> with type http)
@@ -49,23 +49,6 @@ with open(path, "w") as f:
 PYEOF
   echo "  droid runlayer MCP configured"
 
-  # cursor CLI -> ~/.cursor/mcp.json (mcpServers.<name> with url)
-  mkdir -p ~/.cursor
-  python3 - << 'PYEOF'
-import json, os
-path = os.path.expanduser("~/.cursor/mcp.json")
-try:
-    with open(path) as f:
-        data = json.load(f)
-except (FileNotFoundError, json.JSONDecodeError):
-    data = {}
-data.setdefault("mcpServers", {})
-data["mcpServers"]["runlayer"] = {"url": "https://baseten.runlayer.com/mcp"}
-with open(path, "w") as f:
-    json.dump(data, f, indent=2)
-    f.write("\n")
-PYEOF
-  echo "  cursor runlayer MCP configured"
 }
 
 # Symlink the repo's global omp instructions into ~/.omp/agent/AGENTS.md so
@@ -247,10 +230,9 @@ load_env_file() {
   fi
 }
 
-# Generic managed-block writer shared by persist_export_to_rc and
-# configure_cursor. For each rc file (~/.bashrc always; ~/.zshrc if it
-# exists): remove any previous block between the two markers, then append
-# the fresh block at the end of the file.
+# Generic managed-block writer shared by persist_export_to_rc. For each rc file
+# (~/.bashrc always; ~/.zshrc if it exists), remove any previous block between
+# the two markers, then append the fresh block at the end of the file.
 # Usage: write_managed_rc_block <open_marker> <close_marker> <body>
 write_managed_rc_block() {
   local open_m="$1" close_m="$2" body="$3"
@@ -326,103 +308,36 @@ configure_factory() {
     echo "      droid will fall back to its OAuth auth file (~/.factory/auth.v2.file)."
   fi
 }
-
-# Configure the Cursor CLI (`agent`) for portable, file-based auth:
-#   1. Persist AGENT_CLI_CREDENTIAL_STORE=file to shell rc files so cursor-agent
-#      writes ~/.cursor/auth.json (macOS) / ~/.config/cursor/auth.json (Linux)
-#      instead of the macOS Keychain — this is what makes `devpod-bundle` able to
-#      carry the auth to Linux pods.
-#   2. On Linux, copy ~/.cursor/auth.json -> ~/.config/cursor/auth.json (the path
-#      cursor-agent reads there), so a bundle restored to ~/.cursor/auth.json works.
-#   3. Keep sourcing ~/.cursor/env (CURSOR_API_KEY) for compatibility (legacy;
-#      the current cursor-agent binary does not read CURSOR_API_KEY).
-# Idempotent.
-configure_cursor() {
-  persist_export_to_rc "AGENT_CLI_CREDENTIAL_STORE" "file"
-
-  local source_line='[ -f "$HOME/.cursor/env" ] && . "$HOME/.cursor/env"'
-  write_managed_rc_block \
-    '# >>> cursor env (managed by dotfiles setup) >>>' \
-    '# <<< cursor env <<<' \
-    "$source_line"
-
-  # Truly YOLO: cursor-agent has no persisted permission setting — --yolo
-  # auto-approves every tool call and --approve-mcps auto-approves MCP
-  # servers — so wrap it in an alias for interactive shells.
-  write_managed_rc_block \
-    '# >>> cursor-agent yolo alias (managed by dotfiles setup) >>>' \
-    '# <<< cursor-agent yolo alias <<<' \
-    "alias cursor-agent='cursor-agent --yolo --approve-mcps'"
-
-  # Linux: cursor-agent reads ~/.config/cursor/auth.json; a restored bundle puts
-  # the file at ~/.cursor/auth.json, so bridge the two.
-  if [[ "$(uname -s)" != "Darwin" && -f "$HOME/.cursor/auth.json" ]]; then
-    mkdir -p "$HOME/.config/cursor"
-    cp -f "$HOME/.cursor/auth.json" "$HOME/.config/cursor/auth.json"
-    chmod 600 "$HOME/.config/cursor/auth.json"
-    echo "Cursor CLI: copied ~/.cursor/auth.json -> ~/.config/cursor/auth.json (Linux path)."
+# Configure the RTK integration used by OMP.
+# OMP needs the native extension (`--agent omp`); Pi is a different harness and
+# must not be used as an OMP substitute. Idempotent.
+configure_rtk() {
+  if ! command -v rtk >/dev/null 2>&1; then
+    echo "WARNING: rtk not found; skipping RTK integration."
+    return 0
   fi
 
-  if [[ -f "$HOME/.cursor/env" ]]; then
-    echo "Cursor CLI: ~/.cursor/env present; new shells will export CURSOR_API_KEY."
-  else
-    echo "NOTE: ~/.cursor/env not found yet. Create it with:"
-    echo "      printf 'export CURSOR_API_KEY=crsr_...\\n' > ~/.cursor/env && chmod 600 ~/.cursor/env"
-    echo "      or restore it via: devpod-bundle --restore <bundle>.tar.gz"
-  fi
+  echo "Configuring RTK integration for OMP..."
+  RTK_TELEMETRY_DISABLED=1 rtk init -g --agent omp --hook-only --no-patch
+  RTK_TELEMETRY_DISABLED=1 rtk init --show
 }
 
-# Truly YOLO for grok-build: set ~/.grok/config.toml [ui] permission_mode =
-# "always-approve" so the grok CLI auto-approves all tool executions
-# (verified key per docs.x.ai/build settings reference). Idempotent merge:
-# replaces an existing permission_mode, adds the [ui] section if missing,
-# and leaves every other TOML key alone. Harmless when grok isn't installed.
-configure_grok_yolo() {
-  mkdir -p "$HOME/.grok"
-  python3 - << 'PYEOF'
-import os, re
-path = os.path.expanduser("~/.grok/config.toml")
-try:
-    with open(path) as f:
-        text = f.read()
-except FileNotFoundError:
-    text = ""
-if re.search(r'^\s*permission_mode\s*=', text, re.M):
-    text = re.sub(r'^(\s*permission_mode\s*=\s*).*$',
-                  r'\1"always-approve"', text, count=1, flags=re.M)
-elif re.search(r'^\[ui\]\s*$', text, re.M):
-    text = re.sub(r'^(\[ui\]\s*)$',
-                  r'\1\npermission_mode = "always-approve"',
-                  text, count=1, flags=re.M)
-else:
-    text = text.rstrip("\n") + ("\n\n" if text else "") + '[ui]\npermission_mode = "always-approve"\n'
-with open(path, "w") as f:
-    f.write(text)
-print("  grok permission_mode = always-approve")
-PYEOF
-}
-
-# Symlink every skill under <repo>/skills/<name>/SKILL.md into each harness's
-# global skills directory so droid, omp, and cursor-cli all see the same
-# personal skill set. Grok Build is included only when $2 is "true" (default),
-# so brew-setup.sh installs grok skills while setup.sh skips them.
-# Idempotent: re-runs refresh the symlinks.
+# Symlink every skill under <repo>/skills/<name>/SKILL.md into the configured
+# harnesses' global skills directories. OMP and Factory droid are the supported
+# harnesses in this setup.
+# Idempotent: re-runs refresh to the latest local skill contents.
 #
 # Targets (primary path per harness; avoids multi-scan duplicates):
-#   Factory / droid  -> ~/.factory/skills/
-#   omp              -> ~/.omp/agent/skills/
-#   Cursor CLI       -> ~/.cursor/skills/
-#   xAI / Grok Build -> ~/.grok/skills/   (optional, see $2)
+#   Factory / droid -> ~/.factory/skills/
+#   omp             -> ~/.omp/agent/skills/
 #
 # Existing non-symlink directories are left alone (with a warning) so vendor
 # or hand-installed skills are not clobbered.
-# Pass the repo root as $1. Optionally pass "false" as $2 to skip grok.
-# Pass a space-separated list of skill names as $3 to skip them (e.g. design
-# skills that only brew-setup.sh installs).
+# Pass the repo root as $1. Pass a space-separated list of skill names as $2
+# to skip them (e.g. design skills that only brew-setup.sh installs).
 install_shared_skills() {
   local repo_dir="$1"
-  local include_grok="${2:-true}"
-  local exclude_names="${3:-}"
+  local exclude_names="${2:-}"
   local skills_src="$repo_dir/skills"
 
   if [[ ! -d "$skills_src" ]]; then
@@ -433,19 +348,14 @@ install_shared_skills() {
   local targets=(
     "$HOME/.factory/skills"
     "$HOME/.omp/agent/skills"
-    "$HOME/.cursor/skills"
   )
-  if [[ "$include_grok" == "true" ]]; then
-    targets+=("$HOME/.grok/skills")
-  fi
 
   local target skill_dir name dest count=0
   for target in "${targets[@]}"; do
     mkdir -p "$target"
   done
 
-  local harness_names="factory, omp, cursor"
-  [[ "$include_grok" == "true" ]] && harness_names+=", grok"
+  local harness_names="factory, omp"
 
   echo "Installing shared skills from $skills_src ..."
   for skill_dir in "$skills_src"/*/; do
@@ -529,7 +439,7 @@ PYEOF
   # greedily consumes every non-flag arg after -a as an agent name.
     npx --yes skills@latest remove -g -y \
       "${names[@]}" \
-      -a universal -a droid -a cursor \
+      -a universal -a droid \
       || echo "WARNING: skill removal reported errors (continuing)."
 }
 
@@ -549,7 +459,7 @@ PYEOF
 #
 # Agents are listed explicitly rather than --agent '*': Eve and PromptScript
 # do not support global skill installation and would otherwise emit failures.
-# `universal` covers ~/.agents/skills (also picked up by Grok Build, etc.).
+# `universal` covers ~/.agents/skills, which omp reads natively.
 #
 # Pass "true" as $1 to also install the emilkowalski/skills pack
 # (brew-setup.sh on macOS); setup.sh (Linux dev pods) skips it.
@@ -589,7 +499,6 @@ install_skill_packages() {
   local agents=(
     universal
     droid
-    cursor
   )
   local agent_args=()
   local a
@@ -664,8 +573,6 @@ cleanup_stale_baseten_skill() {
     "$HOME/.agents/skills/baseten"
     "$HOME/.factory/skills/baseten"
     "$HOME/.omp/agent/skills/baseten"
-    "$HOME/.cursor/skills/baseten"
-    "$HOME/.grok/skills/baseten"
   )
   local loc removed=0
   for loc in "${locations[@]}"; do
@@ -878,8 +785,8 @@ install_omp() {
 
 # Configure omp (vanilla — no custom agents; omp's built-in task tool and the
 # model roles are the whole setup):
-#   ~/.omp/agent/models.yml    Baseten provider + OpenRouter free-floor provider
-#   ~/.omp/agent/config.yml    model roles + the session-wide fallback chain
+#   ~/.omp/agent/models.yml    Baseten fallback models + optional OpenRouter latest
+#   ~/.omp/agent/config.yml    one ordered ladder shared by all model roles
 # Idempotent: every file is regenerated on each run. Keys are embedded at
 # setup time (repo is private) and models.yml is chmod 600. The global
 # AGENTS.md symlink is owned by install_global_agents_md, not this function.
@@ -891,11 +798,9 @@ configure_omp() {
   fi
   mkdir -p ~/.omp/agent
 
-  # --- models.yml: Baseten provider + optional OpenRouter free floor ---------
-  # GLM-5.3(-Flash)/DeepSeek-V4-Pro take reasoning_effort (high); Nemotron and
-  # GLM-5.2(-Fast) need chat_template_args.enable_thinking (Baseten reasoning
-  # docs); DeepSeek-V4-Flash-0731 is a plain non-reasoning model. compat blocks
-  # replace rather than merge in omp, so each model spells out its full set.
+  # --- models.yml: Baseten fallback models + latest OpenRouter DeepSeek -------
+  # Keep every requested Baseten fallback explicit. compat blocks replace rather
+  # than merge in omp, so each model spells out its complete wire contract.
   cat > ~/.omp/agent/models.yml <<EOF
 # Managed by dotfiles setup (configure_omp in lib/shared.sh) — hand edits are
 # overwritten on the next setup run.
@@ -906,16 +811,15 @@ providers:
     apiKey: "${BASETEN_API_KEY}"
     authHeader: true
     models:
-      - id: zai-org/GLM-5.3
-        name: GLM 5.3
-        reasoning: true
+      - id: deepseek-ai/DeepSeek-V4.1-Flash
+        name: DeepSeek V4.1 Flash
+        reasoning: false
         input: [text]
-        contextWindow: 200000
-        maxTokens: 262144
-        thinking: { mode: effort, minLevel: high, maxLevel: max }
+        contextWindow: 1048576
+        maxTokens: 32768
         compat:
           supportsDeveloperRole: false
-          supportsReasoningEffort: true
+          supportsReasoningEffort: false
           maxTokensField: max_tokens
       - id: zai-org/GLM-5.3-Flash
         name: GLM 5.3 Flash
@@ -928,8 +832,8 @@ providers:
           supportsDeveloperRole: false
           supportsReasoningEffort: true
           maxTokensField: max_tokens
-      - id: deepseek-ai/DeepSeek-V4-Pro-0813
-        name: DeepSeek V4 Pro
+      - id: zai-org/GLM-5.3
+        name: GLM 5.3
         reasoning: true
         input: [text]
         contextWindow: 200000
@@ -939,9 +843,8 @@ providers:
           supportsDeveloperRole: false
           supportsReasoningEffort: true
           maxTokensField: max_tokens
-          reasoningEffortMap: { high: high, xhigh: max }
       - id: deepseek-ai/DeepSeek-V4-Flash-0731
-        name: DeepSeek V4 Flash
+        name: DeepSeek V4 Flash 0731
         reasoning: false
         input: [text]
         contextWindow: 200000
@@ -950,152 +853,94 @@ providers:
           supportsDeveloperRole: false
           supportsReasoningEffort: false
           maxTokensField: max_tokens
-      - id: nvidia/NVIDIA-Nemotron-3-Ultra-550B-A55B
-        name: Nemotron 3 Ultra
-        reasoning: true
-        input: [text]
-        contextWindow: 200000
-        maxTokens: 202800
-        compat:
-          supportsDeveloperRole: false
-          supportsReasoningEffort: false
-          maxTokensField: max_tokens
-          extraBody:
-            chat_template_args:
-              enable_thinking: true
-      - id: zai-org/GLM-5.2
-        name: GLM 5.2
+      - id: deepseek-ai/DeepSeek-V4-Pro-0813
+        name: DeepSeek V4 Pro 0813
         reasoning: true
         input: [text]
         contextWindow: 200000
         maxTokens: 262144
+        thinking: { mode: effort, minLevel: high, maxLevel: max }
         compat:
           supportsDeveloperRole: false
-          supportsReasoningEffort: false
+          supportsReasoningEffort: true
           maxTokensField: max_tokens
-          extraBody:
-            chat_template_args:
-              enable_thinking: true
-      - id: zai-org/GLM-5.2-Fast
-        name: GLM 5.2 Fast
-        reasoning: true
-        input: [text]
-        contextWindow: 200000
-        maxTokens: 262144
-        compat:
-          supportsDeveloperRole: false
-          supportsReasoningEffort: false
-          maxTokensField: max_tokens
-          extraBody:
-            chat_template_args:
-              enable_thinking: true
 EOF
 
-  # Free-floor provider: named "openrouter-free" so it never collides with
-  # omp's built-in openrouter provider, with ids that avoid the ":free" suffix
-  # (omp selectors parse a colon as a thinking-level suffix). Defined for
-  # manual --model use only — NOT part of the fallback chain, which stays
-  # vanilla (the 7 Baseten models). Present only when OPENROUTER_API_KEY is set.
+  # OpenRouter fallback: use only the rolling latest DeepSeek Flash alias.
+  # No OpenRouter free-tier models are configured. The alias is quoted because
+  # its model id intentionally begins with "~".
   if [[ -n "${OPENROUTER_API_KEY:-}" ]]; then
     cat >> ~/.omp/agent/models.yml <<EOF
-  openrouter-free:
+  openrouter:
     baseUrl: https://openrouter.ai/api/v1
     api: openai-completions
     apiKey: "${OPENROUTER_API_KEY}"
     authHeader: true
     models:
-      - id: nemotron-3-ultra-550b-a55b-free
-        name: Nemotron 3 Ultra (free)
-        reasoning: false
-        input: [text]
-        contextWindow: 131072
-        maxTokens: 16384
-        compat:
-          supportsDeveloperRole: false
-          supportsReasoningEffort: false
-          maxTokensField: max_tokens
-      - id: deepseek-chat-free
-        name: DeepSeek Chat (free)
-        reasoning: false
-        input: [text]
-        contextWindow: 65536
-        maxTokens: 8192
-        compat:
-          supportsDeveloperRole: false
-          supportsReasoningEffort: false
-          maxTokensField: max_tokens
-      - id: gemini-2.5-flash-free
-        name: Gemini 2.5 Flash (free)
-        reasoning: false
+      - id: "~deepseek/deepseek-flash-latest"
+        name: DeepSeek Flash Latest (OpenRouter)
+        reasoning: true
         input: [text]
         contextWindow: 1048576
-        maxTokens: 8192
+        maxTokens: 384000
+        thinking: { mode: effort, minLevel: low, maxLevel: max }
         compat:
-          supportsDeveloperRole: false
-          supportsReasoningEffort: false
-          maxTokensField: max_tokens
-      - id: llama-3.3-70b-instruct-free
-        name: Llama 3.3 70B (free)
-        reasoning: false
-        input: [text]
-        contextWindow: 131072
-        maxTokens: 8192
-        compat:
-          supportsDeveloperRole: false
-          supportsReasoningEffort: false
-          maxTokensField: max_tokens
-      - id: qwen3-32b-free
-        name: Qwen3 32B (free)
-        reasoning: false
-        input: [text]
-        contextWindow: 131072
-        maxTokens: 8192
-        compat:
-          supportsDeveloperRole: false
-          supportsReasoningEffort: false
           maxTokensField: max_tokens
 EOF
   else
-    echo "NOTE: OPENROUTER_API_KEY is not set. omp free-floor provider skipped (fallback chain unaffected)."
+    echo "NOTE: OPENROUTER_API_KEY is not set. Latest DeepSeek Flash fallback skipped."
   fi
   chmod 600 ~/.omp/agent/models.yml
 
-  # --- config.yml: model roles + session-wide fallback chain ----------------
-  # Roles: Flash primary everywhere, GLM-5.3 for the heavyweight seats
-  # (slow / plan), advisor kept cheap. "advisor" only
-  # matters if the turn-reviewer feature is enabled; it maps to Flash so an
-  # accidental enable can't burn GLM-5.3 on every turn. All Baseten models are
-  # text-only, so the vision role is left unset on purpose.
+  # --- config.yml: one ordered ladder for every model role ---------------------
+  # The primary route is Copilot Gemini. Native fallback entries are resolved
+  # only when their provider is authenticated; unavailable entries are skipped.
+  # Grok Build/SuperGrok is intentionally tried before Cursor Grok 4.6.
+  # Cursor is restricted to its exact Grok 4.6 route; no other Cursor model can
+  # enter this ladder. Baseten entries follow both subscription routes.
+  # OpenAI Codex Luna and the latest OpenRouter DeepSeek Flash are the final
+  # safety net. All configured models are text-only; no vision role is set.
+
   cat > ~/.omp/agent/config.yml <<EOF
 # Managed by dotfiles setup (configure_omp in lib/shared.sh) — hand edits are
 # overwritten on the next setup run.
 modelRoles:
-  default: baseten/zai-org/GLM-5.3-Flash
-  smol: baseten/zai-org/GLM-5.3-Flash
-  slow: baseten/zai-org/GLM-5.3
-  task: baseten/zai-org/GLM-5.3-Flash
-  tiny: baseten/zai-org/GLM-5.3-Flash
-  commit: baseten/zai-org/GLM-5.3-Flash
-  plan: baseten/zai-org/GLM-5.3
-  advisor: baseten/zai-org/GLM-5.3-Flash
+  default: github-copilot/gemini-3.8-flash
+  smol: github-copilot/gemini-3.8-flash
+  slow: github-copilot/gemini-3.8-flash:high
+  task: github-copilot/gemini-3.8-flash
+  tiny: github-copilot/gemini-3.8-flash
+  commit: github-copilot/gemini-3.8-flash
+  plan: github-copilot/gemini-3.8-flash:high
+  advisor: github-copilot/gemini-3.8-flash
 
 retry:
   enabled: true
   modelFallback: true
   fallbackRevertPolicy: cooldown-expiry
   maxRetries: 10
+  # Preflight supported provider usage before each request. At the 1% remaining
+  # reserve, switch before included subscription usage is exhausted, avoiding
+  # intentional on-demand spill. Unknown usage still fails open per omp policy.
+  usageAwareFallback: true
+  usageReservePct: 1
+  usageReservePolicy: auto
   fallbackChains:
-    # The 7-model Baseten fallback chain (Flash head, then progressively
-    # heavier/cheaper models). Every role — including subagents spawned
-    # by the built-in task tool on the "task" role — inherits this chain.
+    # Ordered fallback ladder:
+    # Grok Build/SuperGrok Grok 4.6 -> Cursor Grok 4.6 -> Baseten DeepSeek
+    # V4.1 Flash -> Baseten GLM-5.3 Flash -> Baseten GLM-5.3 -> Baseten
+    # DeepSeek V4 Flash 0731 -> Baseten DeepSeek V4 Pro -> OpenAI Codex Luna
+    # -> the rolling latest DeepSeek Flash alias on OpenRouter.
     default:
+      - xai-oauth/grok-4.6
+      - cursor/grok-4.6
+      - baseten/deepseek-ai/DeepSeek-V4.1-Flash
       - baseten/zai-org/GLM-5.3-Flash
       - baseten/zai-org/GLM-5.3
-      - baseten/deepseek-ai/DeepSeek-V4-Pro-0813
       - baseten/deepseek-ai/DeepSeek-V4-Flash-0731
-      - baseten/nvidia/NVIDIA-Nemotron-3-Ultra-550B-A55B
-      - baseten/zai-org/GLM-5.2
-      - baseten/zai-org/GLM-5.2-Fast
+      - baseten/deepseek-ai/DeepSeek-V4-Pro-0813
+      - openai-codex/gpt-5.6-luna
+      - openrouter/~deepseek/deepseek-flash-latest
 EOF
 
   # Vanilla: no custom agents under ~/.omp/agent/agents — omp's built-in

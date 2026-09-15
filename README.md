@@ -66,7 +66,7 @@ generated harness configs at setup time.
 │   └── shared.sh      # sourced by all bootstraps: omp installer + model
 │                      #   config, skills, runlayer MCP, Baseten BYOK models
 ├── bin/
-│   └── devpod-bundle  # pack/restore SSH + omp/factory/cursor/grok/truss
+│   └── devpod-bundle  # pack/restore SSH + omp/factory/truss
 │                      #   auth+settings for Mac <-> dev pod sync
 ├── devpod-bundle -> bin/devpod-bundle   (run from repo root on any host)
 ├── clone_runtimes.sh  # shallow-clone the Baseten/vLLM/TensorRT-LLM repos into ~/repos
@@ -87,29 +87,91 @@ generated harness configs at setup time.
 ### Both platforms (via `lib/shared.sh`)
 
 - **omp** (oh-my-pi, `@oh-my-pi/pi-coding-agent`), the coding harness: vanilla
-  setup — no custom agents, no plugins. `configure_omp` writes
-  `~/.omp/agent/models.yml` (Baseten provider + OpenRouter free floor,
-  requires `BASETEN_API_KEY`) and `~/.omp/agent/config.yml` (model roles +
-  the 7-model fallback chain, Flash head). The repo's global rules are
-  symlinked to `~/.omp/agent/AGENTS.md`.
+  setup — no custom agents or plugins. `configure_omp` writes
+  `~/.omp/agent/models.yml` with the requested Baseten fallback models plus an
+  optional latest-DeepSeek OpenRouter route, and `~/.omp/agent/config.yml` with
+  one ordered fallback ladder shared by all model roles. The repo's global rules
+  are symlinked to `~/.omp/agent/AGENTS.md`.
 - **droid** (Factory CLI) via npm, with Baseten BYOK custom models written to
   `~/.factory/settings.json` (requires `BASETEN_API_KEY`).
+
+### omp model routing
+
+`configure_omp` uses the same route for every role, preserving the requested
+order:
+
+1. GitHub Copilot `github-copilot/gemini-3.8-flash` (primary; `:high` for
+   `slow` and `plan`).
+2. Grok Build/SuperGrok `xai-oauth/grok-4.6`.
+3. Cursor `cursor/grok-4.6` (exactly Grok 4.6; no other Cursor model).
+4. Baseten `deepseek-ai/DeepSeek-V4.1-Flash`.
+5. Baseten `zai-org/GLM-5.3-Flash`.
+6. Baseten `zai-org/GLM-5.3`.
+7. Baseten `deepseek-ai/DeepSeek-V4-Flash-0731`.
+8. Baseten `deepseek-ai/DeepSeek-V4-Pro-0813`.
+9. OpenAI Codex `openai-codex/gpt-5.6-luna`.
+10. OpenRouter `openrouter/~deepseek/deepseek-flash-latest`.
+
+- `cursor/grok-4.6` is an exact selector. The Cursor wildcard form,
+  `cursor/*`, would preserve the current model ID and could select other Cursor
+  models; it is intentionally not used.
+- `xai-oauth/grok-4.6` is the Grok Build/SuperGrok subscription route and is
+  deliberately ahead of Cursor. Both subscription providers have usage
+  tracking; `usageReservePct: 1` switches at 1% remaining instead of
+  intentionally spending into on-demand usage.
+- OMP has no literal dollar-cap setting, so disable on-demand spending in the
+  Cursor and Grok account settings to guarantee a hard `$40` ceiling.
+- `retry.modelFallback` must remain enabled for this ladder. Entries are
+  skipped when their provider has no credentials. Log in with `/login
+  github-copilot`, `/login cursor`, `/login xai-oauth`, and `/login
+  openai-codex` to enable the subscription-backed routes.
+- `usageAwareFallback` switches on provider-reported quota before a hard
+  rate-limit response. Unknown usage fails open, so account-level on-demand
+  disablement is required for a strict no-overage guarantee.
+- `OPENROUTER_API_KEY` is optional. When set, only
+  `~deepseek/deepseek-flash-latest` is added; no OpenRouter free models are
+  configured.
+
 - **FACTORY_API_KEY** and **FACTORY_DISABLE_KEYRING=1** persisted to shell rc
   files so droid stores auth in the portable `~/.factory/auth.v2.file` +
   `auth.v2.key` pair instead of the macOS login keychain.
-- **runlayer MCP** configured in omp, droid, and cursor.
+- **runlayer MCP** configured in omp and droid.
 - **git identity** (name + email) configured globally.
-- **rtk** (Rust Token Killer - LLM token proxy), initialized for omp
-  (Pi coding agent) and Cursor (preToolUse hook). Note: rtk has no native
-  Droid/Factory integration; Droid is not wired here.
+- **rtk** (Rust Token Killer), initialized with its native OMP extension
+  (`--agent omp`). It compresses eligible shell command output; source files
+  and structured data remain lossless.
+- **Caveman** is not inserted as an automatic proxy. Its compression is useful
+  for noisy prose/logs, but a proxy would sit in front of every provider route
+  and can alter context semantics. If evaluated, use its A/B/trial workflow
+  first and keep it off the primary coding path unless the result is
+  demonstrably safe.
 - **~/venv** (via `uv`) with **truss** (Baseten model authoring / deploy-loop).
-- Personal skills from the repo's `skills/` directory, symlinked into every
-  harness (`~/.factory/skills/`, `~/.omp/agent/skills/`,
-  `~/.cursor/skills/`, and `~/.grok/skills/` on macOS). Design skills
-  (`frontend-design`) are skipped on Linux dev pods and installed only by
-  `brew-setup.sh`. Third-party packs (mattpocock, expo, emilkowalski on
+- Personal skills from the repo's `skills/` directory, symlinked into OMP and
+  Factory droid (`~/.omp/agent/skills/` and `~/.factory/skills/`). The
+  `sglang-development` skill is included for canonical SGLang patch tracking.
+  Design skills (`frontend-design`) are skipped on Linux dev pods and installed
+  only by `brew-setup.sh`. Third-party packs (mattpocock, expo, emilkowalski on
   macOS) are installed via the `skills` CLI into `~/.agents/skills/`
   (`universal`), which omp reads natively.
+
+### SGLang patch workflow
+
+The canonical `sglang-development` skill is vendored at
+`skills/sglang-development/SKILL.md` and is linked into every configured harness
+by `install_shared_skills`. It governs the Baseten SGLang patch stack:
+
+```sh
+make init_sglang
+make commit_sglang FEATURE=name DESCRIPTION=/path/description.txt
+make review_sglang_patch 12              # or 12..14
+make replay_sglang VERSION=vX.Y.Z
+make export_sglang
+```
+
+Use `SGLANG_SOURCE_DIR=/path/to/sglang` to select another checkout; the default
+is `./sglang`. For SGLang changes, agents must read and follow this skill before
+editing, keep patches numerically ordered and self-contained, and export patches
+separately from committing the enclosing Baseten repository.
 
 ### Linux (`setup.sh`)
 
@@ -135,8 +197,8 @@ apt:
 ### macOS (`brew-setup.sh`)
 
 - Homebrew formulae: `baseten btop croc gh node mole rtk tmux uv`
-- Homebrew casks: `brave-browser@beta ghostty font-jetbrains-mono-nerd-font grok-build`
-- **droid** (npm) and **cursor-cli** (official curl installer)
+- Homebrew casks: `brave-browser@beta ghostty font-jetbrains-mono-nerd-font`
+- **droid** (npm), plus OMP's native provider integrations
 - `~/.baseten_aliases` created if missing; the managed `ksh` shell helper is
   (re)written and a copy kept in the repo for version control
 - `brew cleanup --prune=all` at the end
@@ -162,24 +224,19 @@ format. A droid session lives at `~/.factory/sessions/<encoded-cwd>/<session-id>
 
 ## devpod-bundle (`bin/devpod-bundle`)
 
-Pack the auth + settings for SSH, omp, Factory droid, Cursor CLI, grok
-CLI, and truss (Baseten) into one tar.gz, croc it to a dev pod, and restore it
-there - so you only stay logged in on one machine (your Mac).
+Pack the auth + settings for SSH, omp, Factory droid, and truss (Baseten) into
+one tar.gz, croc it to a dev pod, and restore it there - so you only stay
+logged in on one machine (your Mac).
 
 Paths in the archive are relative to `$HOME`, so restore works on any pod
 regardless of username.
 
 **omp** config travels via `~/.omp/agent/models.yml` (Baseten key inline),
-`config.yml` (roles + fallback chain), and `mcp.json`; `--restore` verifies
-the inline apiKey landed. Skills and the `AGENTS.md` symlink come from the
-dotfiles repo on the pod, not from this bundle.
-
-**Cursor CLI** auth is file-based: set `AGENT_CLI_CREDENTIAL_STORE=file` so
-`cursor-agent` writes `~/.cursor/auth.json` on macOS (and reads
-`~/.config/cursor/auth.json` on Linux). That file IS bundled; on restore it is
-copied to `~/.config/cursor/auth.json` on Linux.
-`~/.cursor/env` (`CURSOR_API_KEY`) is also bundled and sourced by shell rc, but
-it is legacy - the current `cursor-agent` binary does not read `CURSOR_API_KEY`.
+`config.yml` (role-specific models + fallback chains), and `mcp.json`.
+Every logged-in OMP provider is exported from `agent.db`'s
+`auth_credentials` table to `.omp/agent/omp-auth-credentials.json` and merged
+back into the pod's `agent.db` during restore. OMP's `agent.db` itself is not
+bundled because it also contains machine-local history, caches, and usage data.
 
 **Factory droid** auth is file-based too: set `FACTORY_DISABLE_KEYRING=1` so
 droid writes the portable `~/.factory/auth.v2.file` + `auth.v2.key` pair instead
@@ -194,7 +251,7 @@ needs re-auth.
 # On the Mac (the machine you stay logged in on):
 devpod-bundle                          # writes ~/devpod-bundle-<stamp>.tar.gz
 devpod-bundle --list                   # dry run, write nothing
-devpod-bundle -o /tmp/x.tgz            # custom output path
+devpod-bundle -o ~/devpod-bundle-custom.tar.gz  # custom output path
 croc send ~/devpod-bundle-*.tar.gz
 
 # On the dev pod (after `git pull` of this repo at ~/dotfiles):
@@ -205,8 +262,6 @@ croc send ~/devpod-bundle-*.tar.gz
 
 ## Notes
 
-- The only coding harnesses installed are **omp**, **droid**
-  (Factory CLI), **cursor-cli**, and **grok-build** (macOS only, Homebrew
-  cask - it has no curl installer).
+- The only coding harnesses installed are **omp** and **droid** (Factory CLI).
 - Herdr bash completions are regenerated on Linux if `herdr` is present
   (Herdr itself is installed out-of-band).
