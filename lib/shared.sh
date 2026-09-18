@@ -864,6 +864,26 @@ providers:
           supportsDeveloperRole: false
           supportsReasoningEffort: true
           maxTokensField: max_tokens
+  # Local SWE-2 slice on rack 17 (kimi-k3-swe-2-omp, 1xTP8 DSpark batch-4).
+  # Served via a persistent port-forward on 127.0.0.1:18090; auth none.
+  # Unreachable entries are skipped by the fallback ladder, so this is safe
+  # to keep even when the slice is down.
+  swe2:
+    baseUrl: http://127.0.0.1:18090/v1
+    api: openai-completions
+    auth: none
+    models:
+      - id: moonshotai/Kimi-K3
+        name: SWE-2 (rack17 omp slice)
+        reasoning: true
+        input: [text]
+        contextWindow: 1048576
+        maxTokens: 49152
+        thinking: { mode: effort, minLevel: low, maxLevel: max }
+        compat:
+          supportsDeveloperRole: false
+          supportsReasoningEffort: true
+          maxTokensField: max_tokens
 EOF
 
   # OpenRouter fallback: use only the rolling latest DeepSeek Flash alias.
@@ -893,7 +913,9 @@ EOF
   chmod 600 ~/.omp/agent/models.yml
 
   # --- config.yml: one ordered ladder for every model role ---------------------
-  # The primary route is Copilot Gemini. Native fallback entries are resolved
+  # The primary route is the local SWE-2 rack-17 slice for workhorse roles
+  # (default/task/slow/plan); smol/tiny/commit/advisor stay on Copilot Gemini
+  # to keep the batch-4 slice free for real work. Native fallback entries are resolved
   # only when their provider is authenticated; unavailable entries are skipped.
   # Grok Build/SuperGrok is intentionally tried before Cursor Grok 4.6.
   # Cursor is restricted to its exact Grok 4.6 route; no other Cursor model can
@@ -905,13 +927,13 @@ EOF
 # Managed by dotfiles setup (configure_omp in lib/shared.sh) — hand edits are
 # overwritten on the next setup run.
 modelRoles:
-  default: github-copilot/gemini-3.8-flash
+  default: swe2/moonshotai/Kimi-K3
   smol: github-copilot/gemini-3.8-flash
-  slow: github-copilot/gemini-3.8-flash:high
-  task: github-copilot/gemini-3.8-flash
+  slow: swe2/moonshotai/Kimi-K3:high
+  task: swe2/moonshotai/Kimi-K3
   tiny: github-copilot/gemini-3.8-flash
   commit: github-copilot/gemini-3.8-flash
-  plan: github-copilot/gemini-3.8-flash:high
+  plan: swe2/moonshotai/Kimi-K3:high
   advisor: github-copilot/gemini-3.8-flash
 
 retry:
