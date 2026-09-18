@@ -1,62 +1,34 @@
 #!/usr/bin/env bash
 # devpod-bundle - pack auth + settings for SSH, omp (oh-my-pi), factory droid,
-# and truss (Baseten) into a single tar.gz so they can be sent via croc to a
-# dev pod and unpacked into the right locations.
+# and truss (Baseten) into one tar.gz, croc it to a dev pod, restore it there —
+# so you only stay logged in on one machine (your Mac).
 #
-# Two modes:
+# Modes:
+#   bundle  (default)              run on the Mac; writes ~/devpod-bundle-<stamp>.tar.gz (mode 600)
+#   restore (--restore <file>)     run on the pod; extracts into $HOME
 #
-#   bundle  (default)  - run on the Mac you stay logged in on. Reads the
-#                       local auth/settings files and writes a timestamped
-#                       ~/devpod-bundle-<stamp>.tar.gz (mode 600).
-#   restore (--restore <file>.tar.gz)
-#                     - run on the dev pod. Extracts a bundle into $HOME,
-#                       skipping the embedded RESTORE.txt note (which is
-#                       printed to stdout instead of littering ~).
+# Paths in the archive are relative to $HOME, so `cd ~ && tar -xzf` restores on
+# any pod regardless of username (--restore does the same, minus the note).
 #
-# Paths in the archive are stored RELATIVE TO $HOME (e.g. ./.ssh/id_ed25519,
-# ./.omp/agent/models.yml), so on any pod you can also just:
-#
-#     cd ~ && tar -xzf devpod-bundle-*.tar.gz
-#
-# regardless of the pod's username. The --restore mode does exactly that,
-# minus the RESTORE.txt note.
-#
-# omp (oh-my-pi) config lives in ~/.omp/agent/ (models.yml with the Baseten
-# API key inline, config.yml with roles + fallback chain, mcp.json, and the
-# AGENTS.md symlink target config/omp/AGENTS.md from this dotfiles repo).
-# OMP keeps every provider login in agent.db's auth_credentials table. The
-# complete table is exported to .omp/agent/omp-auth-credentials.json in the
-# archive and merged into the pod's agent.db on restore. agent.db itself is
-# excluded (machine-local, huge).
-#
-# Settings sync: this bundle IS the transport for omp settings and provider
-# credentials to dev pods (models.yml / config.yml / mcp.json + all provider
-# auth are packed fresh on every run). The dotfiles repo supplies AGENTS.md +
-# skills.
-
-# factory droid auth is file-based too: set FACTORY_DISABLE_KEYRING=1 so droid
-# writes the portable ~/.factory/auth.v2.file + auth.v2.key pair instead of the
-# macOS login keychain (auth.v2.loginkeychain, which is NOT portable to Linux).
-# The auth.v2.file/key pair IS bundled.
-#
-# docker CLI auth is file-based on this setup: ~/.docker/config.json holds the
-# Hub login + access/refresh tokens inline (no credsStore), so it bundles as
-# a plain file and works as-is on the pod.
-#
-# gh (GitHub CLI) keeps its OAuth token in the macOS keyring (NOT portable),
-# so at bundle time `gh auth token` is used to stage a keyring-free
-# hosts.yml with the token inline; it is bundled as .config/gh/hosts.yml,
-# overriding the token-less copy. gh on the pod then needs no keyring.
-# Verify with `gh auth status` (restore does this too).
-#
-# The output file is mode 600 (it contains secrets). Re-run anytime; each
-# bundle produces a new timestamped archive and leaves old ones in place.
+# Auth portability notes:
+#   omp      ~/.omp/agent/{models.yml,config.yml,mcp.json} are bundled. Every
+#            provider login is also exported from agent.db's auth_credentials
+#            table to omp-auth-credentials.json and merged back on restore
+#            (agent.db itself is excluded: machine-local, huge).
+#   droid    set FACTORY_DISABLE_KEYRING=1 so auth lands in the portable
+#            ~/.factory/auth.v2.{file,key} pair, not the macOS login keychain.
+#   gh       OAuth token lives in the macOS keyring (not portable); `gh auth
+#            token` stages a keyring-free hosts.yml with the token inline.
+#   docker   ~/.docker/config.json holds Hub auth inline; bundles as a file.
 #
 # Usage:
-#   devpod-bundle                          # write ~/devpod-bundle-<stamp>.tar.gz
-#   devpod-bundle --list                   # show what would be packed, write nothing
-#   devpod-bundle -o ~/devpod-bundle-custom.tar.gz  # write to a custom path
-#   devpod-bundle --restore <bundle>.tar.gz --dry-run  # list only, extract nothing
+#   devpod-bundle                                   # write a timestamped bundle
+#   devpod-bundle --list                            # show what would be packed
+#   devpod-bundle -o ~/bundle.tar.gz                # custom output path
+#   devpod-bundle --restore <bundle> [--dry-run]    # on the pod
+#
+# The output file is mode 600 (it contains secrets); each run writes a new
+# timestamped archive and leaves old ones in place.
 
 set -euo pipefail
 

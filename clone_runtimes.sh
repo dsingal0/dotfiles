@@ -1,8 +1,9 @@
 #!/bin/bash
+# clone_runtimes.sh - clone the Baseten/vLLM/TensorRT-LLM repos into ~/repos,
+# in parallel. Already-cloned repos are unshallowed (or skipped if full).
 set -euo pipefail
 
 CLONE_DIR="${CLONE_DIR:-$HOME/repos}"
-
 mkdir -p "$CLONE_DIR"
 
 REPOS=(
@@ -22,52 +23,21 @@ REPOS=(
 )
 
 clone_one() {
-  local url="$1"
-  local dir="$2"
-  local target="$CLONE_DIR/$dir"
-
+  local url="$1" target="$CLONE_DIR/$2"
   if [ -d "$target/.git" ]; then
-    echo "Already cloned: $target"
-  else
-    echo "Cloning (shallow) $url -> $target"
-    git clone --depth 1 "$url" "$target"
+    if git -C "$target" rev-parse --is-shallow-repository 2>/dev/null | grep -q true; then
+      echo "Unshallowing $target"; git -C "$target" fetch --unshallow
+    else
+      echo "Already cloned: $target"
+    fi
+    return
   fi
+  # A full clone lands the same history as shallow-clone + fetch --unshallow.
+  echo "Cloning $url -> $target"; git clone "$url" "$target"
 }
 
-unshallow_one() {
-  local dir="$1"
-  local target="$CLONE_DIR/$dir"
-
-  if [ -d "$target/.git" ]; then
-    echo "Unshallowing $target"
-    git -C "$target" fetch --unshallow
-  fi
-}
-
-pids=()
-
 for entry in "${REPOS[@]}"; do
-  url="${entry%:*}"
-  dir="${entry##*:}"
-  clone_one "$url" "$dir" &
-  pids+=($!)
+  clone_one "${entry%:*}" "${entry##*:}" &
 done
-
-for pid in "${pids[@]}"; do
-  wait "$pid"
-done
-
-echo "All shallow clones complete. Unshallowing..."
-
-pids=()
-for entry in "${REPOS[@]}"; do
-  dir="${entry##*:}"
-  unshallow_one "$dir" &
-  pids+=($!)
-done
-
-for pid in "${pids[@]}"; do
-  wait "$pid"
-done
-
+wait
 echo "Done!"

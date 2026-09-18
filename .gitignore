@@ -2,3 +2,6 @@
 # to .env and fill in your keys locally.
 .env
 __pycache__/
+
+# Generated omp model/pricing data dumps — regenerable artifacts, not config.
+.omp-*.json

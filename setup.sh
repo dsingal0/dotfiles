@@ -1,134 +1,45 @@
 #!/usr/bin/env bash
+# setup.sh - Linux (apt) bootstrap. Idempotent: re-run to install or update.
+#
+# Installs the apt toolchain, then hands off to bootstrap_common (lib/) for the
+# shared omp/droid/factory/skills config. See lib/bootstrap.sh for the sequence.
 set -euo pipefail
 
-# This script is idempotent: it can be run both for initial installs and updates.
-
-# Helper: append a line to a file only if it's not already present.
-append_once() {
-  local file="$1"
-  local line="$2"
-  grep -qxF "$line" "$file" 2>/dev/null || echo "$line" >> "$file"
-}
-
-# Install/update system packages (btop).
-# Use sudo only if available and we're not already root; otherwise call apt-get
-# directly. All of this is best-effort (tolerate missing apt / non-root / non-Debian).
-if command -v sudo >/dev/null 2>&1 && [[ "${EUID:-$(id -u)}" -ne 0 ]]; then
-  ADO="sudo apt-get"
-  SUDO="sudo"
-else
-  ADO="apt-get"
-  SUDO=""
-fi
-$ADO update -y || true
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-
-# Source shared config helpers (omp install/config, Baseten BYOK models, skills,
-# MCP), deduplicated with brew-setup.sh so both bootstrap scripts stay in sync.
 . "$SCRIPT_DIR/lib/shared.sh"
 
-# unzip is required by the bun installer (omp's binary needs bun; see
-# install_omp in lib/shared.sh).
-$ADO install -y btop unzip libclang-dev tree libevent-dev libncurses-dev build-essential bison || true
-
-# Install/update tmux from apt.
-# Previously this built tmux from source with --prefix=/usr/local, which
-# shadowed the distro binary in /usr/bin. We now use the distro package so the
-# system tmux is what you get; see tmux.conf for a tmux 3.3+ version guard
-# around the (3.2a-unavailable) extended-keys-format option.
-echo "Installing tmux..."
-$ADO install -y tmux
+# --- system packages (apt) ---------------------------------------------------
+if command -v sudo >/dev/null 2>&1 && [[ "${EUID:-$(id -u)}" -ne 0 ]]; then
+  SUDO="sudo"; ADO="sudo apt-get"
+else
+  SUDO=""; ADO="apt-get"
+fi
+# unzip is required by the bun installer (omp's binary needs bun).
+$ADO update -y || true
+$ADO install -y \
+  btop unzip libclang-dev tree libevent-dev libncurses-dev build-essential bison tmux \
+  || true
 tmux -V
 
-# Login shells (tmux panes run `-bash`) read ~/.profile, not ~/.bashrc, where
-# installers (bun.sh, nvm) append PATH setup. Bridge the two so new panes pick
-# up tool PATHs without restarting the tmux server.
-link_profile_to_bashrc
-
-# Reload config into running tmux server, if any
-tmux source-file "$HOME/.tmux.conf" 2>/dev/null || true
-
-# Link custom user scripts into ~/.local/bin (on PATH via the uv step below)
-mkdir -p "$HOME/.local/bin"
-rm -f "$HOME/.local/bin/droid-export"
-ln -sf "$SCRIPT_DIR/bin/devpod-bundle" "$HOME/.local/bin/devpod-bundle"
-
-# Download and install/update nvm:
-curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/master/install.sh | bash
-
-# Ensure nvm init lines are in .bashrc (the installer sometimes fails to add them)
-append_once "$HOME/.bashrc" 'export NVM_DIR="$HOME/.nvm"'
-append_once "$HOME/.bashrc" '[ -s "$NVM_DIR/nvm.sh" ] && \. "$NVM_DIR/nvm.sh"'
-
-# in lieu of restarting the shell
-\. "$HOME/.nvm/nvm.sh"
-
-# Download and install/update Node.js (latest release):
-nvm install node
-nvm use node
-
-# Verify the Node.js version:
-node -v # Should print the latest Node.js release.
-
-# Uninstall stale npm-managed copies of packages reinstalled below, so they
-# don't shadow the fresh installs on PATH.
-npm uninstall -g droid @getpaseo/cli 2>/dev/null || true
-
-# 2026-09 stack: omp (oh-my-pi, @oh-my-pi/pi-coding-agent) is the coding
-# harness. jcode/carry are manual installs; not part of bootstrap.
-load_env_file "$SCRIPT_DIR"
-
-install_omp
-configure_omp
-
-# Install the repo's global omp instructions (~/.omp/agent/AGENTS.md) so
-# every project session follows the same global rules.
-install_global_agents_md "$SCRIPT_DIR"
-
-configure_runlayer_mcp
-
-# Install droid (Factory CLI) - npm always runs postinstall scripts, so the
-# npm-managed install is the reliable one.
-rm -f "$HOME/.local/bin/droid" 2>/dev/null || true
-echo "Installing droid..."
-npm install -g droid
-
-# Install/update gh from GitHub's official apt repo (replaces the webi.sh curl
-# pipe; gh has no official npm package).
-echo "Installing gh..."
+# --- gh (GitHub's official apt repo) ------------------------------------------
 if ! command -v gh >/dev/null 2>&1; then
+  echo "Installing gh..."
   $SUDO mkdir -p -m 755 /etc/apt/keyrings
-  curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg | $SUDO tee /etc/apt/keyrings/githubcli-archive-keyring.gpg > /dev/null
+  curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg \
+    | $SUDO tee /etc/apt/keyrings/githubcli-archive-keyring.gpg > /dev/null
   $SUDO chmod go+r /etc/apt/keyrings/githubcli-archive-keyring.gpg
-  echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" | $SUDO tee /etc/apt/sources.list.d/github-cli.list > /dev/null
+  echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" \
+    | $SUDO tee /etc/apt/sources.list.d/github-cli.list > /dev/null
   $ADO update -y
   $ADO install -y gh
 fi
 
-# Ensure ~/.local/bin is on PATH for future shells (custom scripts + uv/rtk/croc)
-append_once "$HOME/.bashrc" 'export PATH="$HOME/.local/bin:$PATH"'
+# --- toolchain ---------------------------------------------------------------
+install_node_nvm
+install_uv
+install_rust
 
-# Install/update uv
-echo "Installing uv..."
-curl -LsSf https://astral.sh/uv/install.sh | sh
-# Ensure uv is on PATH for the rest of this script (installer targets ~/.local/bin)
-export PATH="$HOME/.local/bin:$PATH"
-# shellcheck disable=SC1091
-\. "$HOME/.local/bin/env" 2>/dev/null || true
-
-# Install/update Rust and Cargo
-echo "Installing Rust..."
-if command -v rustup >/dev/null 2>&1; then
-  rustup update stable
-else
-  curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
-fi
-# Ensure cargo/rustc are on PATH for the rest of this script
-\. "$HOME/.cargo/env" 2>/dev/null || true
-rustc --version
-cargo --version
-
-# Set LIBCLANG_PATH for bindgen (needed by Rust crates that wrap C/C++ libs)
+# LIBCLANG_PATH for bindgen (Rust crates wrapping C/C++ libs).
 for d in /usr/lib/llvm-*/lib; do
   if [[ -f "$d/libclang.so" ]]; then
     append_once "$HOME/.bashrc" "export LIBCLANG_PATH=\"$d\""
@@ -136,66 +47,14 @@ for d in /usr/lib/llvm-*/lib; do
   fi
 done
 
-
-
-# Install/update rtk (Rust Token Killer) - CLI proxy that cuts LLM token usage.
-# Single Rust binary in ~/.local/bin; ensure that dir is on PATH for this script
-# (the .bashrc append below only applies to future shells).
+# rtk (curl installer) — must precede bootstrap_common's configure_rtk.
 export PATH="$HOME/.local/bin:$PATH"
-echo "Installing rtk..."
 curl -fsSL https://raw.githubusercontent.com/rtk-ai/rtk/refs/heads/master/install.sh | sh
 rtk --version
 
-# Initialize the RTK integration for OMP.
-configure_rtk
-
-# Configure git identity for remote dev pods (idempotent)
-echo "Configuring git identity..."
-git config --global user.name "Dhruv Singal"
-git config --global user.email "dhruv.singalabc@gmail.com"
-
-# Configure Factory: Baseten BYOK custom models (~/.factory/settings.json) and
-# FACTORY_API_KEY exported to shell rc files for the droid CLI.
-# Keys are read from .env in the repo root (kept local, never committed).
-# Copy .env.example to .env and fill in your keys:
-#   cp .env.example .env
-# Keys can also be exported directly: BASETEN_API_KEY=... FACTORY_API_KEY=... ./setup.sh
-configure_factory "$SCRIPT_DIR"
-
-# Remove the stale third-party baseten skill (basetenlabs/baseten-skills) so the
-# repo's static, pruned, BIS-focused copy (skills/baseten/) gets symlinked in
-# its place by install_shared_skills below.
-cleanup_stale_baseten_skill
-
-# Install personal skills into OMP and Factory droid.
-# Design skills (frontend-design) are skipped here and installed only by
-# brew-setup.sh (macOS).
-install_shared_skills "$SCRIPT_DIR" "frontend-design"
-
-# Third-party skill packs for all agents. Expo/EAS and design packs are skipped
-# here (Linux dev pods) and installed only by brew-setup.sh (macOS). The baseten
-# skill is no longer pulled from basetenlabs/baseten-skills (out of date); it
-# lives as a static copy in this repo under skills/baseten/ (installed above).
-install_skill_packages false false
-
-# Baseten CLI (https://github.com/basetenlabs/baseten-cli)
-# Homebrew if available, else GitHub release -> ~/.local/bin
-install_baseten_cli
-
-# croc file transfer (https://github.com/schollz/croc)
-ensure_croc
-
-# Install/update Herdr bash completions (herdr is installed out-of-band; this
-# regenerates the script so it stays in sync with the installed binary).
-if command -v herdr >/dev/null 2>&1; then
-  echo "Installing Herdr bash completions..."
-  mkdir -p "$HOME/.local/share/bash-completion/completions"
-  herdr completion bash > "$HOME/.local/share/bash-completion/completions/herdr"
-  append_once "$HOME/.bashrc" '# Herdr bash completions (managed by dotfiles setup)'
-  append_once "$HOME/.bashrc" '[[ -r "$HOME/.local/share/bash-completion/completions/herdr" ]] && source "$HOME/.local/share/bash-completion/completions/herdr"'
-fi
-
-# ~/venv with truss (Baseten model authoring / deploy-loop)
-ensure_venv
+# --- shared config + tools ---------------------------------------------------
+# Design skills (frontend-design) + expo/emilkowalski packs are skipped on Linux
+# dev pods; they are installed only by brew-setup.sh (macOS).
+bootstrap_common "$SCRIPT_DIR" "frontend-design" false false
 
 echo "Setup complete!"
