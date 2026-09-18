@@ -914,12 +914,11 @@ EOF
 
   # --- config.yml: one ordered ladder for every model role ---------------------
   # The primary route is the local SWE-2 rack-17 slice for workhorse roles
-  # (default/task/slow/plan); smol/tiny/commit/advisor stay on Copilot Gemini
-  # to keep the batch-4 slice free for real work. Native fallback entries are resolved
-  # only when their provider is authenticated; unavailable entries are skipped.
-  # Grok Build/SuperGrok is intentionally tried before Cursor Grok 4.6.
-  # Cursor is restricted to its exact Grok 4.6 route; no other Cursor model can
-  # enter this ladder. Baseten entries follow both subscription routes.
+  # (default/task/slow/plan); smol/tiny/commit/advisor use Copilot Grok 4.6 to
+  # keep the batch-4 slice free for real work. Gemini 3.8 flash is antigravity-
+  # only (no copilot/cursor Gemini); Muse 1.3 is not on the Baseten mapi.
+  # Grok 4.6 is reachable three ways — xAI OAuth, Cursor (id cursor-grok-4.6),
+  # and Copilot — all three ride the ladder before Baseten.
   # OpenAI Codex Luna and the latest OpenRouter DeepSeek Flash are the final
   # safety net. All configured models are text-only; no vision role is set.
 
@@ -927,14 +926,16 @@ EOF
 # Managed by dotfiles setup (configure_omp in lib/shared.sh) — hand edits are
 # overwritten on the next setup run.
 modelRoles:
+  # All roles on the local SWE-2 slice (one model, one string — simplest). The
+  # fallback ladder below catches a down/saturated slice and spillover.
   default: swe2/moonshotai/Kimi-K3
-  smol: github-copilot/gemini-3.8-flash
-  slow: swe2/moonshotai/Kimi-K3:high
+  smol: swe2/moonshotai/Kimi-K3
+  slow: swe2/moonshotai/Kimi-K3
   task: swe2/moonshotai/Kimi-K3
-  tiny: github-copilot/gemini-3.8-flash
-  commit: github-copilot/gemini-3.8-flash
-  plan: swe2/moonshotai/Kimi-K3:high
-  advisor: github-copilot/gemini-3.8-flash
+  tiny: swe2/moonshotai/Kimi-K3
+  commit: swe2/moonshotai/Kimi-K3
+  plan: swe2/moonshotai/Kimi-K3
+  advisor: swe2/moonshotai/Kimi-K3
 
 retry:
   enabled: true
@@ -948,21 +949,35 @@ retry:
   usageReservePct: 1
   usageReservePolicy: auto
   fallbackChains:
-    # Ordered fallback ladder:
-    # Grok Build/SuperGrok Grok 4.6 -> Cursor Grok 4.6 -> Baseten DeepSeek
-    # V4.1 Flash -> Baseten GLM-5.3 Flash -> Baseten GLM-5.3 -> Baseten
-    # DeepSeek V4 Flash 0731 -> Baseten DeepSeek V4 Pro -> OpenAI Codex Luna
-    # -> the rolling latest DeepSeek Flash alias on OpenRouter.
+    # Overall model preference order (2026-09-18), free/already-paid-for only:
+    #   1. SWE-2 (swe2 — local rack-17 slice; the default role's model)
+    #   2. Grok 4.6 on xAI OAuth / Cursor / Copilot (three routes, same model).
+    #      NOTE: Cursor's model id is cursor-grok-4.6 (provider prefixes
+    #      "cursor-"); a bare "cursor/grok-4.6" id does not exist and is skipped.
+    #   3. Antigravity Gemini 3.8 flash (antigravity/gemini-3.8-flash).
+    #   4. Muse 1.3 — NOT routed: not on the Baseten mapi (checked /v1/models);
+    #      coding-assistant-only, no omp provider. Skipped.
+    #   5-9. Baseten mapi: DeepSeek-V4.1-Flash, GLM-5.3, GLM-5.3-Flash,
+    #      DeepSeek-V4-Flash-0731, DeepSeek-V4-Pro-0813 (in that order).
+    #  10. Cursor Composer 2.5 (id composer-2.5; added per request, before openrouter).
+    #  11. OpenRouter rolling DeepSeek Flash alias.
+    # Codex models sit at the very end as the safety net, in order:
+    # Luna, then Sol, then Astra (openai luna/sol/astra).
     default:
       - xai-oauth/grok-4.6
-      - cursor/grok-4.6
+      - cursor/cursor-grok-4.6
+      - github-copilot/grok-4.6
+      - antigravity/gemini-3.8-flash
       - baseten/deepseek-ai/DeepSeek-V4.1-Flash
-      - baseten/zai-org/GLM-5.3-Flash
       - baseten/zai-org/GLM-5.3
+      - baseten/zai-org/GLM-5.3-Flash
       - baseten/deepseek-ai/DeepSeek-V4-Flash-0731
       - baseten/deepseek-ai/DeepSeek-V4-Pro-0813
-      - openai-codex/gpt-5.6-luna
+      - cursor/composer-2.5
       - openrouter/~deepseek/deepseek-flash-latest
+      - openai-codex/gpt-5.6-luna
+      - openai-codex/gpt-5.6-sol
+      - openai-codex/gpt-6-astra
 EOF
 
   # Vanilla: no custom agents under ~/.omp/agent/agents — omp's built-in
