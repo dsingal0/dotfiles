@@ -3,6 +3,11 @@
 # in parallel. Already-cloned repos are unshallowed (or skipped if full).
 set -euo pipefail
 
+# Never block on SSH prompts: accept-new trusts a first-seen github.com host
+# key automatically; BatchMode fails instead of prompting for a password or
+# passphrase when no key is loaded.
+export GIT_SSH_COMMAND="ssh -o BatchMode=yes -o StrictHostKeyChecking=accept-new"
+
 CLONE_DIR="${CLONE_DIR:-$HOME/repos}"
 mkdir -p "$CLONE_DIR"
 

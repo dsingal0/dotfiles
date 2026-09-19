@@ -10,10 +10,14 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 # --- system packages (apt) ---------------------------------------------------
 if command -v sudo >/dev/null 2>&1 && [[ "${EUID:-$(id -u)}" -ne 0 ]]; then
-  SUDO="sudo"; ADO="sudo apt-get"
+  SUDO="sudo"; ADO="sudo DEBIAN_FRONTEND=noninteractive apt-get"
 else
-  SUDO=""; ADO="apt-get"
+  SUDO=""; ADO="DEBIAN_FRONTEND=noninteractive apt-get"
 fi
+# DEBIAN_FRONTEND=noninteractive keeps package debconf questions (e.g.
+# tzdata) from blocking; apt-get -y only covers apt's own confirmation.
+# (sudo needs no guard: with no controlling tty it fails fast rather than
+# block on a password prompt.)
 # unzip is required by the bun installer (omp's binary needs bun).
 $ADO update -y || true
 $ADO install -y \

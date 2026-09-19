@@ -86,7 +86,7 @@ install_baseten_cli() {
   if command -v brew >/dev/null 2>&1; then
     brew tap basetenlabs/baseten
     brew trust basetenlabs/baseten 2>/dev/null || true
-    brew install baseten
+    brew install baseten </dev/null
     baseten --version 2>/dev/null || baseten version 2>/dev/null || true
     return 0
   fi
@@ -108,7 +108,7 @@ install_baseten_cli() {
 ensure_croc() {
   echo "Installing croc..."
   if command -v brew >/dev/null 2>&1; then
-    brew install croc
+    brew install croc </dev/null
     croc --version 2>/dev/null || true
     return 0
   fi
